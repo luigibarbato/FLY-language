@@ -65,31 +65,43 @@ class FLYGeneratorPython extends AbstractGenerator {
 	int nthread
 	int memory
 	int timeout
+	/*KUBERNETES ENVS*/
+	int nreplicas
+	int nparallels
+	/*END*/
 	String user = null
 	Resource resourceInput
 	boolean isLocal
+	boolean isCluster
 	boolean isAsync 
 	String env_name=""
-	var list_environment = new ArrayList<String>(Arrays.asList("smp","aws","aws-debug","azure"));
+	var list_environment = new ArrayList<String>(Arrays.asList("smp","aws","aws-debug","azure","kubernetes"));
 	ArrayList listParams = null
 	List<String> allReqs=null
 
 	def generatePython(Resource input, IFileSystemAccess2 fsa, IGeneratorContext context, String name_file,
 		FunctionDefinition func, VariableDeclaration environment, HashMap<String, HashMap<String, String>> scoping,
-		long id, boolean local, boolean async) {
+		long id, boolean local, boolean async, boolean cluster) {
 		name = name_file
 		root = func
 		typeSystem = scoping
 		id_execution = id
 		env_name=environment.name
-		if (!local) {
+		if (!local && !cluster) {
 			env = (environment.right as DeclarationObject).features.get(0).value_s
 			user = (environment.right as DeclarationObject).features.get(1).value_s
 			language = (environment.right as DeclarationObject).features.get(5).value_s
 			nthread = (environment.right as DeclarationObject).features.get(6).value_t
 			memory = (environment.right as DeclarationObject).features.get(7).value_t
 			timeout = (environment.right as DeclarationObject).features.get(8).value_t					
-		} else {
+		} 
+		else if(cluster){
+			env = (environment.right as DeclarationObject).features.get(0).value_s
+			language = (environment.right as DeclarationObject).features.get(1).value_s
+			nreplicas = (environment.right as DeclarationObject).features.get(2).value_t
+			nparallels = (environment.right as DeclarationObject).features.get(3).value_t 
+			}
+		else{
 			env = "smp"
 			language = (environment.right as DeclarationObject).features.get(2).value_s
 			nthread = (environment.right as DeclarationObject).features.get(1).value_t
@@ -105,6 +117,7 @@ class FLYGeneratorPython extends AbstractGenerator {
 		}
 		this.isAsync = async
 		this.isLocal = local;
+		this.isCluster = cluster;
 		doGenerate(input, fsa, context)
 	}
 
@@ -129,7 +142,8 @@ class FLYGeneratorPython extends AbstractGenerator {
 			fsa.generateFile(root.name + ".py", input.compilePython(root.name, true))	
 		}else {
 			if(env.equals("aws-debug"))
-			fsa.generateFile("docker-compose-script.sh",input.compileDockerCompose())
+				fsa.generateFile("docker-compose-script.sh",input.compileDockerCompose())
+			
 			fsa.generateFile(root.name +"_"+ env_name +"_deploy.sh", input.compileScriptDeploy(root.name, false))
 			fsa.generateFile(root.name +"_"+ env_name + "_undeploy.sh", input.compileScriptUndeploy(root.name, false))
 		}
@@ -329,6 +343,7 @@ class FLYGeneratorPython extends AbstractGenerator {
 		var s = ''''''
 		if (exp instanceof ChannelSend) {
 			var env = (exp.target.environment.get(0).right as DeclarationObject).features.get(0).value_s ;//(exp.target as DeclarationObject).features.get(0).value_s;
+			println(env)
 			s += '''			
 			«IF local»
 				«exp.target.name».write(json.dumps(«generatePyArithmeticExpression(exp.expression, scope, local)»).encode('utf8'))
@@ -446,6 +461,14 @@ class FLYGeneratorPython extends AbstractGenerator {
 								«exp.name» = urllib.request.urlopen(urllib.request.Request(«path»,headers={'Content-Type':'application/x-www-form-urlencoded;charset=utf-8'}))
 							else:
 								«exp.name» = open(«path»,'rw')'''
+						}
+						case "kubernetes":{
+							var n_replicas = ((exp.right as DeclarationObject).features.get(2) as DeclarationFeature).value_s
+							var n_parallels = ((exp.right as DeclarationObject).features.get(3) as DeclarationFeature).value_s
+							
+							return '''
+							ciao'''
+							
 						}
 						case "sql":{
 							if (exp.onCloud && (exp.environment.get(0).right as DeclarationObject).features.get(0).value_s.contains("aws")){
@@ -1018,7 +1041,7 @@ class FLYGeneratorPython extends AbstractGenerator {
 				return '''«channelName».readline()'''
 			}
 			var env = ((exp.target.environment as VariableDeclaration).right as DeclarationObject).features.get(0).value_s
-			if(env.equals("aws")){ 
+			if(env.equals("aws") || env.equals("kubernetes")){ 
 				return '''«channelName».receive_messages()[0]'''
 			}else if(env.equals("azure")){
 				return '''
@@ -1209,6 +1232,7 @@ class FLYGeneratorPython extends AbstractGenerator {
 		   case "aws": AWSDeploy(resource,name,local,false)
 		   case "aws-debug": AWSDebugDeploy(resource,name,local,true)
 		   case "azure": AzureDeploy(resource,name,local)
+		   case "kubernetes": KubernetesDeploy(resource,name,local,false)
 		   default: this.env+" not supported"
   		}
 	} 	
@@ -1390,6 +1414,65 @@ class FLYGeneratorPython extends AbstractGenerator {
 	rm ${id}_lambda.zip
 	rm rolePolicyDocument.json
 	rm policyDocument.json
+	'''
+	def CharSequence KubernetesDeploy(Resource resource, String name, boolean local, boolean debug)
+	'''
+	#!/bin/bash
+	
+	echo "checking if Docker is on and fine ..."
+	docker info > /dev/null 2>&1
+	
+	if [ $? -eq 0 ]; then
+		echo "Docker is on :) continuing..."
+	else
+	     echo "Docker doesn't responding... :("
+	     exit 1
+	fi
+	
+	
+	echo "checking if Kubernetes is on and fine ..."
+	kubectl cluster-info > /dev/null 2>&1 #Da rivedere in caso il cluster non sia in locale
+	
+	if [ $? -eq 0 ]; then
+		echo "Kube says hello :) continuing..."
+	else
+	     echo "Kube has something wrong :("
+	     exit 1
+	fi
+	
+	echo "checking if Registry is on and fine ..."
+	curl http://localhost:5000/v2/_catalog > /dev/null 2>&1 # renderlo un servizio con ip/dns fisso
+	if [ $? -eq 0 ]; then
+		echo "Registry is on :) continuing..."
+	else
+	     echo "Registry doesn't responding... :("
+	     exit 1
+	fi
+	echo "Entering in the Python env"
+	cd python
+	echo "Generating Python code...
+	echo "«generateBodyPy(root.body,root.parameters,name,env, local)»
+	
+	«FOR fd:functionCalled.values()»
+		
+	«generatePyExpression(fd, name, local)»
+	
+	«ENDFOR»
+	" > main.py
+	
+	echo "Python file created"
+	echo "Building and pushing the flying image"
+	
+	docker build -t fly_python . 
+	docker tag fly_python localhost:5000/fly_python
+	docker push localhost:5000/fly_python
+	
+	echo "it's the moment:"
+	
+	kubectl apply -f python.yaml
+	
+	echo "We are Flying!! :)"
+	
 	'''
 	
 	def CharSequence AWSDebugDeploy(Resource resource, String name, boolean local, boolean debug)

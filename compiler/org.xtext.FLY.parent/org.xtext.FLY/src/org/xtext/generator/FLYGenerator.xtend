@@ -82,7 +82,7 @@ class FLYGenerator extends AbstractGenerator {
 	var id_execution = System.currentTimeMillis
 	var last_func_result = null
 	var deployed_function = new HashMap<String,ArrayList<String>>();
-	var list_environment = new ArrayList<String>(Arrays.asList("smp","aws","aws-debug","azure"));
+	var list_environment = new ArrayList<String>(Arrays.asList("smp","aws","aws-debug","azure","kubernetes"));
 	Resource res = null
 
 	override void doGenerate(Resource resource, IFileSystemAccess2 fsa, IGeneratorContext context) {
@@ -93,15 +93,15 @@ class FLYGenerator extends AbstractGenerator {
 			// generate .java file
 			typeSystem.put("main", new HashMap<String, String>())
 			fsa.generateFile(name + ".java", resource.compileJava)
-			// generate .js or .py file
+			// NDR
 			for (element : resource.allContents.toIterable.filter(FlyFunctionCall)) {
 				var type_env = ((element.environment.right as DeclarationObject).features.get(0) as DeclarationFeature).value_s;
 				var async = element.isAsync;
 				if(type_env.equals("smp") && ((element.environment.right as DeclarationObject).features.length==3)){
 					if(((element.environment.right as DeclarationObject).features.get(2) as DeclarationFeature).value_s.contains("python")){
-						pyGen.generatePython(resource,fsa,context,name,element.target,element.environment,typeSystem,id_execution,true,async);
+						pyGen.generatePython(resource,fsa,context,name,element.target,element.environment,typeSystem,id_execution,false,async,true);
 					}else{
-						jsGen.generateJS(resource,fsa,context,name,element.target,element.environment,typeSystem,id_execution,true,async);
+						jsGen.generateJS(resource,fsa,context,name,element.target,element.environment,typeSystem,id_execution,false,async,true);
 					}	
 				}
 				if (type_env != "smp") {
@@ -119,12 +119,17 @@ class FLYGenerator extends AbstractGenerator {
 							language = ((element.environment.right as DeclarationObject).features.get(6) as DeclarationFeature).value_s;
 							
 						}
+						case "kubernetes":{
+							language = ((element.environment.right as DeclarationObject).features.get(1) as DeclarationFeature).value_s;
+							
+						}
+
 					}
-					
+				//generate .js or .py file
 					if (language.contains("python")){
-						pyGen.generatePython(resource,fsa,context,name,element.target,element.environment,typeSystem,id_execution,false,async); 
+						pyGen.generatePython(resource,fsa,context,name,element.target,element.environment,typeSystem,id_execution,false,async,true); 
 					}else if (language.contains("nodejs")) {
-						jsGen.generateJS(resource,fsa,context,name,element.target,element.environment,typeSystem,id_execution,false,async);
+						jsGen.generateJS(resource,fsa,context,name,element.target,element.environment,typeSystem,id_execution,false,async,true);
 					}
 				}
 			}
@@ -293,6 +298,32 @@ class FLYGenerator extends AbstractGenerator {
 					e.printStackTrace();
 				}		
 				«ENDIF»
+				
+				«IF isKubernetes()»
+				Runtime.getRuntime().exec("chmod +x src-gen/kubernetes_deploy.sh");
+								ProcessBuilder __processBuilder_kubernetes_deployer = new ProcessBuilder("/bin/bash", "-c", "src-gen/kubernetes_deploy.sh");
+								Map<String, String> __env_kubernetes_deployer = __processBuilder_kubernetes_deployer.environment();
+								String __path_env_kubernetes_deployer = __env_kubernetes_deployer.get("PATH");
+								if (!__path_env_kubernetes_deployer.contains("/usr/local/bin")) {
+									 __env_kubernetes_deployer.put("PATH", __path_env_kubernetes_deployer+":/usr/local/bin");
+								}
+								Process __p_kubernetes_deployer;
+								try {
+									__p_kubernetes_deployer = __processBuilder_kubernetes_deployer.start();
+									BufferedReader __p_kubernetes_deployer_output = new BufferedReader(new InputStreamReader(__p_kubernetes_deployer.getInputStream()));
+									String __kubernetes_deployer_output_line = __p_kubernetes_deployer_output.readLine();
+									while(__kubernetes_deployer_output_line !=null) {
+										System.out.println(__kubernetes_deployer_output_line);
+										if (__kubernetes_deployer_output_line.contains("wrong."))
+											break;
+										__kubernetes_deployer_output_line=__p_kubernetes_deployer_output.readLine();
+									}
+								} catch (Exception e) {
+									e.printStackTrace();
+								}		
+				«ENDIF»
+				
+				
 				«FOR element : resource.allContents.toIterable.filter(VariableDeclaration).filter[right instanceof DeclarationObject].
 				filter[list_environment.contains((right as DeclarationObject).features.get(0).value_s)]»
 					«setEnvironmentDeclarationInfo(element)»
@@ -637,6 +668,7 @@ class FLYGenerator extends AbstractGenerator {
 			if (dec.right instanceof DeclarationObject){ 
 				var type = (dec.right as DeclarationObject).features.get(0).value_s
 				switch (type) {
+
 					case "smp": {
 						return '''
 							static ExecutorService __thread_pool_«dec.name» = Executors.newFixedThreadPool(«((dec.right as DeclarationObject).features.get(1)).value_t»);
@@ -1409,7 +1441,20 @@ class FLYGenerator extends AbstractGenerator {
 				__fly_environment.get("«dec_name»").put("region","«region»");
 				
 			'''
-		}else if (env.equals("azure")){
+		}
+		else if (env.contains("kubernetes")) {
+			var language =  ((dec.right as DeclarationObject).features.get(1) as DeclarationFeature).value_s
+			var nreplicas = ((dec.right as DeclarationObject).features.get(2) as DeclarationFeature).value_t
+			var nparallels= ((dec.right as DeclarationObject).features.get(3) as DeclarationFeature).value_t
+			return '''
+				__fly_environment.put("«dec_name»", new HashMap<String,Object>());
+				__fly_environment.get("«dec_name»").put("language","«language»");
+				__fly_environment.get("«dec_name»").put("nreplicas",«nreplicas»);
+				__fly_environment.get("«dec_name»").put("nparallels",«nparallels»);
+			'''
+			}
+
+		else if (env.equals("azure")){
 			var threads = ((dec.right as DeclarationObject).features.get(7) as DeclarationFeature).value_t
 //			var memory = ((dec.right as DeclarationObject).features.get(7) as DeclarationFeature).value_t
 			var time = ((dec.right as DeclarationObject).features.get(8) as DeclarationFeature).value_t
@@ -2751,7 +2796,7 @@ class FLYGenerator extends AbstractGenerator {
 		func_ID++
 		return ret
 	}
-	
+		
 	
 
 	def generateChannelReceive(ChannelReceive receive, String scope) {
@@ -3416,6 +3461,10 @@ class FLYGenerator extends AbstractGenerator {
 		}
 	}
 	
+	def CharSequence compileK8sJava(Resource resource){
+		
+}
+			
 	def Boolean checkAWS(){
 		for(VariableDeclaration env: res.allContents.toIterable.filter(VariableDeclaration).filter[right instanceof DeclarationObject].
 			filter[list_environment.contains((right as DeclarationObject).features.get(0).value_s)]
@@ -3444,6 +3493,16 @@ class FLYGenerator extends AbstractGenerator {
 			filter[list_environment.contains((right as DeclarationObject).features.get(0).value_s)]
 		){
 			if ((env.right as DeclarationObject).features.get(0).value_s.equals("azure"))
+				return true
+		}
+		return false
+	}
+	
+	def Boolean isKubernetes(){
+			for(VariableDeclaration env: res.allContents.toIterable.filter(VariableDeclaration).filter[right instanceof DeclarationObject].
+				filter[list_environment.contains((right as DeclarationObject).features.get(0).value_s)]
+		){
+			if ((env.right as DeclarationObject).features.get(0).value_s.equals("kubernetes"))
 				return true
 		}
 		return false

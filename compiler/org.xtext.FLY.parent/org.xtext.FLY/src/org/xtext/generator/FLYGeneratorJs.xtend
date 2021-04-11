@@ -62,7 +62,12 @@ class FLYGeneratorJs extends AbstractGenerator {
 	String language = ""
 	int memory = 0
 	int nthread = 0
+	int timeout = 0
 	int time = 0
+	/*KUBERNETES ENVS*/
+	int nreplicas = 0
+	int nparallels = 0
+	/*END*/
 	FunctionDefinition root = null
 	HashMap<String, FunctionDefinition> functionCalled = null
 	Resource resourceInput
@@ -71,29 +76,37 @@ class FLYGeneratorJs extends AbstractGenerator {
 	var user = ""
 	HashMap<String, HashMap<String, String>> typeSystem = null
 	boolean isLocal;
+	boolean isCluster
 	boolean isAsync;
-	var list_environment = new ArrayList<String>(Arrays.asList("smp","aws","aws-debug","azure"));
+	var list_environment = new ArrayList<String>(Arrays.asList("smp","aws","aws-debug","azure","kubernetes"));
 	
 	
 	def generateJS(Resource input, IFileSystemAccess2 fsa, IGeneratorContext context,String name_file, FunctionDefinition func, 
-		VariableDeclaration environment, HashMap<String, HashMap<String, String>> scoping, long id,boolean local,boolean async){
+		VariableDeclaration environment, HashMap<String, HashMap<String, String>> scoping, long id,boolean local,boolean async, boolean cluster){
 		this.name=name_file
 		this.root = func
 		this.typeSystem=scoping
 		this.resourceInput = input
 		this.id_execution = id
 		this.env_name = environment.name
-		if(!local){
-			this.env = (environment.right as DeclarationObject).features.get(0).value_s
-			this.user = (environment.right as DeclarationObject).features.get(1).value_s
-			this.language = (environment.right as DeclarationObject).features.get(5).value_s
-			this.nthread = (environment.right as DeclarationObject).features.get(6).value_t
-			this.memory = (environment.right as DeclarationObject).features.get(7).value_t
-			this.time = (environment.right as DeclarationObject).features.get(8).value_t
-		}else{
-			this.env="smp"
-			this.nthread = (environment.right as DeclarationObject).features.get(1).value_t
-			this.language = (environment.right as DeclarationObject).features.get(2).value_s
+		if (!local && !cluster) {
+			env = (environment.right as DeclarationObject).features.get(0).value_s
+			user = (environment.right as DeclarationObject).features.get(1).value_s
+			language = (environment.right as DeclarationObject).features.get(5).value_s
+			nthread = (environment.right as DeclarationObject).features.get(6).value_t
+			memory = (environment.right as DeclarationObject).features.get(7).value_t
+			timeout = (environment.right as DeclarationObject).features.get(8).value_t					
+		} 
+		else if(cluster){
+			env = (environment.right as DeclarationObject).features.get(0).value_s
+			language = (environment.right as DeclarationObject).features.get(1).value_s
+			nreplicas = (environment.right as DeclarationObject).features.get(2).value_t
+			nparallels = (environment.right as DeclarationObject).features.get(3).value_t 
+			}
+			else{
+			env = "smp"
+			language = (environment.right as DeclarationObject).features.get(2).value_s
+			nthread = (environment.right as DeclarationObject).features.get(1).value_t
 		}
 		functionCalled = new HashMap<String, FunctionDefinition>();
 		for (element : input.allContents.toIterable.filter(FunctionDefinition)
@@ -103,7 +116,8 @@ class FLYGeneratorJs extends AbstractGenerator {
 			functionCalled.put(element.name,element)
 		}
 		this.isAsync = async
-		this.isLocal = local 
+		this.isLocal = local
+		this.isCluster = cluster;
 		doGenerate(input,fsa,context) 
 	}
 	
@@ -153,7 +167,10 @@ class FLYGeneratorJs extends AbstractGenerator {
 		fsa.generateFile(root.name + ".js", input.compileJavaScript(root.name, true))	
 	}else {
 		if(env.equals("aws-debug"))
-				fsa.generateFile("docker-compose-script.sh",input.compileDockerCompose())
+			fsa.generateFile("docker-compose-script.sh",input.compileDockerCompose())
+		if(env.equals("kubernetes"))
+			fsa.generateFile("kubernetes_deploy.sh", input.compileScriptDeploy(root.name, false))
+					
 			fsa.generateFile(root.name +"_"+ env_name +"_deploy.sh", input.compileScriptDeploy(root.name, false))
 			fsa.generateFile(root.name +"_"+ env_name + "_undeploy.sh", input.compileScriptUndeploy(root.name, false))
 		}
@@ -1257,6 +1274,7 @@ class FLYGeneratorJs extends AbstractGenerator {
 		   case "aws": AWSDeploy(resource,name,local,false)
 		   case "aws-debug": AWSDebugDeploy(resource,name,local,true)
 		   case "azure": AzureDeploy(resource,name,local)
+		   case "kubernetes": KubernetesDeploy(resource,name,local,false)
 		   default: this.env+" not supported"
   		}
 	} 
@@ -1486,6 +1504,76 @@ class FLYGeneratorJs extends AbstractGenerator {
 		rm policyDocument.json
 	
 	'''
+	
+	def CharSequence KubernetesDeploy(Resource resource, String name, boolean local, boolean debug)
+	'''
+	#!/bin/bash
+	
+	echo "checking if Docker is on and fine ..."
+	docker info > /dev/null 2>&1
+	
+	if [ $? -eq 0 ]; then
+		echo "Docker is on :) continuing..."
+	else
+	     echo "Docker doesn't responding... :("
+	     exit 1
+	fi
+	
+	
+	echo "checking if Kubernetes is on and fine ..."
+	kubectl cluster-info > /dev/null 2>&1 #Da rivedere in caso il cluster non sia in locale
+	
+	if [ $? -eq 0 ]; then
+		echo "Kube says hello :) continuing..."
+	else
+	     echo "Kube has something wrong :("
+	     exit 1
+	fi
+	
+	echo "checking if Registry is on and fine ..."
+	curl http://localhost:5000/v2/_catalog > /dev/null 2>&1
+	if [ $? -eq 0 ]; then
+		echo "Registry is on :) continuing..."
+	else
+	     echo "Registry doesn't responding... :("
+	     exit 1
+	fi
+	echo "Entering in the Node env"
+	cd node
+	echo "Generating Js code...
+	echo '«generateBodyJs(resource,root.body,root.parameters,name,env)»
+				«FOR fd:functionCalled.values()»
+					
+				«generateJsExpression(fd, name)»
+				
+				«ENDFOR»
+	" > main.js
+	
+	echo "Js file created"
+	echo "Building and pushing the flying image"
+	
+	docker build -t fly_node . 
+	docker tag fly_node localhost:5000/fly_node
+	docker push localhost:5000/fly_node
+	
+	echo "it's the moment:"
+	rm -f node.yaml temp.yml template.yaml
+	wget --no-cache --no-cookies -O template.yaml https://gist.githubusercontent.com/luigibarbato/733fb7e76cc4f6d55216c80249397c38/raw/5dd6f48e41037528e59b3c8adcd373eab5ee4466/template.yaml
+	export completions=«nreplicas»
+	export parallelism=«nparallels»
+	( echo "cat <<EOF >node.yaml";
+	  cat template.yaml;
+	  echo "EOF";
+	) >temp.yml
+	. temp.yml
+	cat node.yaml
+	
+	kubectl apply -f node.yaml
+	echo "We are Flying!! :)"
+	kubectl wait --for=condition=complete --timeout=120s -f node.yaml
+	kubectl logs job/static-demo
+	'''
+	
 	
 	def CharSequence AWSUndeploy(Resource resource, String name)'''
 		#!/bin/bash
