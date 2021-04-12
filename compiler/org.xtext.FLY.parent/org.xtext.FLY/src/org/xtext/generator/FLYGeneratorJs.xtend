@@ -67,6 +67,7 @@ class FLYGeneratorJs extends AbstractGenerator {
 	/*KUBERNETES ENVS*/
 	int nreplicas = 0
 	int nparallels = 0
+	String registryName = "localhost:5000"
 	/*END*/
 	FunctionDefinition root = null
 	HashMap<String, FunctionDefinition> functionCalled = null
@@ -78,7 +79,7 @@ class FLYGeneratorJs extends AbstractGenerator {
 	boolean isLocal;
 	boolean isCluster
 	boolean isAsync;
-	var list_environment = new ArrayList<String>(Arrays.asList("smp","aws","aws-debug","azure","kubernetes"));
+	var list_environment = new ArrayList<String>(Arrays.asList("smp","aws","aws-debug","azure","kubernetes","k8s-azure"));
 	
 	
 	def generateJS(Resource input, IFileSystemAccess2 fsa, IGeneratorContext context,String name_file, FunctionDefinition func, 
@@ -89,6 +90,14 @@ class FLYGeneratorJs extends AbstractGenerator {
 		this.resourceInput = input
 		this.id_execution = id
 		this.env_name = environment.name
+		
+		env = (environment.right as DeclarationObject).features.get(0).value_s
+		if (env == "k8s-azure"){
+			language = (environment.right as DeclarationObject).features.get(1).value_s
+			registryName = (environment.right as DeclarationObject).features.get(2).value_s
+			nreplicas = (environment.right as DeclarationObject).features.get(3).value_t
+			nparallels = (environment.right as DeclarationObject).features.get(4).value_t 
+		}
 		if (!local && !cluster) {
 			env = (environment.right as DeclarationObject).features.get(0).value_s
 			user = (environment.right as DeclarationObject).features.get(1).value_s
@@ -168,9 +177,11 @@ class FLYGeneratorJs extends AbstractGenerator {
 	}else {
 		if(env.equals("aws-debug"))
 			fsa.generateFile("docker-compose-script.sh",input.compileDockerCompose())
-		if(env.equals("kubernetes"))
+		if(env.equals("kubernetes") || env.equals("k8s-azure")){
+			fsa.generateFile("Dockerfile", input.compileDockerTemplate())
+			fsa.generateFile("template.yaml", input.compileK8sJobTemplate())
 			fsa.generateFile("kubernetes_deploy.sh", input.compileScriptDeploy(root.name, false))
-					
+			}
 			fsa.generateFile(root.name +"_"+ env_name +"_deploy.sh", input.compileScriptDeploy(root.name, false))
 			fsa.generateFile(root.name +"_"+ env_name + "_undeploy.sh", input.compileScriptUndeploy(root.name, false))
 		}
@@ -1275,6 +1286,7 @@ class FLYGeneratorJs extends AbstractGenerator {
 		   case "aws-debug": AWSDebugDeploy(resource,name,local,true)
 		   case "azure": AzureDeploy(resource,name,local)
 		   case "kubernetes": KubernetesDeploy(resource,name,local,false)
+		   case "k8s-azure": AzDeploy(resource)
 		   default: this.env+" not supported"
   		}
 	} 
@@ -1574,7 +1586,118 @@ class FLYGeneratorJs extends AbstractGenerator {
 	kubectl logs job/static-demo
 	'''
 	
+	def CharSequence AzDeploy(Resource resource){
+	'''#!/bin/bash
+		
+		echo "Checking that azure-cli is installed"
+		which az > /dev/null 2>&1
+		if [ $? -eq 0 ]; then
+			 echo "azure-cli is installed, continuing..."
+		else
+			      echo "You need azure-cli to continue. Google 'azure-cli install'"
+			      exit 1
+		fi
+			
+		echo "Checking if Kubernetes cluster is on and fine ..."
+		kubectl cluster-info > /dev/null 2>&1
+	    if [ $? -eq 0 ]; then
+	         echo "Cluster is on and fine, Checking info..."
+	         kubectl cluster-info
+	         read -p "Continue? [y/n]" -n 1 -r
+	         echo    # (optional) move to a new line
+	         if [[ ! $REPLY =~ ^[Yy]$ ]]
+	            then
+	                exit 1
+	            fi
+	        else
+	                echo "Cluster is not reachable..."
+	                exit 1
+	        fi
+		echo "Checking Registry ..."
+		az acr login --name FlyRegistry > /dev/null 2>&1
+		if [ $? -eq 0 ]; then
+	         echo "Registry is on and fine, Checking info..."
+	         az acr check-health --name FlyRegistry --ignore-errors --yes
+	         read -p "Continue? [y/n]" -n 1 -r
+	         echo    # (optional) move to a new line
+	         if [[ ! $REPLY =~ ^[Yy]$ ]]
+	            then
+	                exit 1
+	            fi
+		else
+			      echo "Problems with the registry..."
+			      exit 1
+		fi
+	    echo "All right! We are starting!"
+	    echo "Entering in the Node env"
+		echo "Generating Js code...
+		echo '«generateBodyJs(resource,root.body,root.parameters,name,env)»
+					«FOR fd:functionCalled.values()»
+						
+					«generateJsExpression(fd, name)»
+					
+					«ENDFOR»
+		" > main.js
+		
+	    echo "Js file created"
+	    echo "Building and pushing the flying image"
+	    az acr build --registry «registryName» --image fly_node .
+	    
+	    echo "it's the moment:"
+	    
+		export completions=«nreplicas»
+		export parallelism=«nparallels»
+		export registryName=«registryName»
+		
+		( echo "cat <<EOF >node.yaml";
+		  cat template.yaml;
+		  echo "EOF";
+		) >temp.yml
+		. temp.yml
+		cat node.yaml
+		
+		kubectl apply -f node.yaml
+		echo "We are Flying!! :)"
+		kubectl wait --for=condition=complete --timeout=120s -f node.yaml
+		kubectl logs job/static-demo
+		rm -f node.yaml temp.yml template.yaml
+		'''
+	}
 	
+	def CharSequence compileDockerTemplate(Resource resource){
+		'''
+		FROM node:10
+		MAINTAINER Luigi Barbato <l.barbato11@studenti.unisa.it>
+		EXPOSE 8888
+		WORKDIR /function
+		COPY package.json package.json
+		RUN npm install
+		COPY . .
+		CMD ["node", "main.js"]
+		'''
+	}
+   def CharSequence compileK8sJobTemplate(Resource resource){
+   	'''
+   	apiVersion: batch/v1
+   	kind: Job
+   	metadata:
+   	  name: fly-job
+   	spec:
+   	  parallelism: ${parallelism}
+   	  completions: ${completions}
+   	  template:
+   	    metadata:
+   	      name: fly
+   	      labels:
+   	        jobgroup: fly
+   	    spec:
+   	      containers:
+   	        - name: fly-node
+   	          image: ${registryName}/fly_node
+   	          command: [ "node", "./main.js" ]
+   	      restartPolicy: Never
+   	'''
+   }
 	def CharSequence AWSUndeploy(Resource resource, String name)'''
 		#!/bin/bash
 			

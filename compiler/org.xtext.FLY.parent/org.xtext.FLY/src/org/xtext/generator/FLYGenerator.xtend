@@ -82,7 +82,7 @@ class FLYGenerator extends AbstractGenerator {
 	var id_execution = System.currentTimeMillis
 	var last_func_result = null
 	var deployed_function = new HashMap<String,ArrayList<String>>();
-	var list_environment = new ArrayList<String>(Arrays.asList("smp","aws","aws-debug","azure","kubernetes"));
+	var list_environment = new ArrayList<String>(Arrays.asList("smp","aws","aws-debug","azure","kubernetes","k8s-azure"));
 	Resource res = null
 
 	override void doGenerate(Resource resource, IFileSystemAccess2 fsa, IGeneratorContext context) {
@@ -123,7 +123,10 @@ class FLYGenerator extends AbstractGenerator {
 							language = ((element.environment.right as DeclarationObject).features.get(1) as DeclarationFeature).value_s;
 							
 						}
-
+						case "k8s-azure":{
+							language = ((element.environment.right as DeclarationObject).features.get(2) as DeclarationFeature).value_s;
+							
+						}
 					}
 				//generate .js or .py file
 					if (language.contains("python")){
@@ -1453,7 +1456,21 @@ class FLYGenerator extends AbstractGenerator {
 				__fly_environment.get("«dec_name»").put("nparallels",«nparallels»);
 			'''
 			}
-
+		else if (env.contains("k8s-azure")) {
+			var registryName= ((dec.right as DeclarationObject).features.get(1) as DeclarationFeature).value_s
+			var language =  ((dec.right as DeclarationObject).features.get(2) as DeclarationFeature).value_s
+			var nreplicas = ((dec.right as DeclarationObject).features.get(3) as DeclarationFeature).value_t
+			var nparallels= ((dec.right as DeclarationObject).features.get(4) as DeclarationFeature).value_t
+			
+			return '''
+				__fly_environment.put("«dec_name»", new HashMap<String,Object>());
+				__fly_environment.get("«dec_name»").put("language","«language»");
+				__fly_environment.get("«dec_name»").put("nreplicas",«nreplicas»);
+				__fly_environment.get("«dec_name»").put("nparallels",«nparallels»);
+				__fly_environment.get("«dec_name»").put("registryName","«registryName»");
+				
+			'''
+			}
 		else if (env.equals("azure")){
 			var threads = ((dec.right as DeclarationObject).features.get(7) as DeclarationFeature).value_t
 //			var memory = ((dec.right as DeclarationObject).features.get(7) as DeclarationFeature).value_t
@@ -3502,12 +3519,13 @@ class FLYGenerator extends AbstractGenerator {
 			for(VariableDeclaration env: res.allContents.toIterable.filter(VariableDeclaration).filter[right instanceof DeclarationObject].
 				filter[list_environment.contains((right as DeclarationObject).features.get(0).value_s)]
 		){
-			if ((env.right as DeclarationObject).features.get(0).value_s.equals("kubernetes"))
+			if ((env.right as DeclarationObject).features.get(0).value_s.equals("kubernetes") || (env.right as DeclarationObject).features.get(0).value_s.equals("k8s-azure"))
 				return true
 		}
 		return false
 	}
-
+	
+	
 	def checkBlock(EObject el) {
 		if (el instanceof FunctionDefinition) {
 			return true
