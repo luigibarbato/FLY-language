@@ -1460,14 +1460,14 @@ class FLYGenerator extends AbstractGenerator {
 			var registryName= ((dec.right as DeclarationObject).features.get(1) as DeclarationFeature).value_s
 			var language =  ((dec.right as DeclarationObject).features.get(2) as DeclarationFeature).value_s
 			var nreplicas = ((dec.right as DeclarationObject).features.get(3) as DeclarationFeature).value_t
-			var nparallels= ((dec.right as DeclarationObject).features.get(4) as DeclarationFeature).value_t
+			var nparallels = ((dec.right as DeclarationObject).features.get(4) as DeclarationFeature).value_t
 			
 			return '''
 				__fly_environment.put("«dec_name»", new HashMap<String,Object>());
+				__fly_environment.get("«dec_name»").put("registryName","«registryName»");
 				__fly_environment.get("«dec_name»").put("language","«language»");
 				__fly_environment.get("«dec_name»").put("nreplicas",«nreplicas»);
 				__fly_environment.get("«dec_name»").put("nparallels",«nparallels»);
-				__fly_environment.get("«dec_name»").put("registryName","«registryName»");
 				
 			'''
 			}

@@ -93,8 +93,8 @@ class FLYGeneratorJs extends AbstractGenerator {
 		
 		env = (environment.right as DeclarationObject).features.get(0).value_s
 		if (env == "k8s-azure"){
-			language = (environment.right as DeclarationObject).features.get(1).value_s
-			registryName = (environment.right as DeclarationObject).features.get(2).value_s
+			registryName = (environment.right as DeclarationObject).features.get(1).value_s
+			language = (environment.right as DeclarationObject).features.get(2).value_s
 			nreplicas = (environment.right as DeclarationObject).features.get(3).value_t
 			nparallels = (environment.right as DeclarationObject).features.get(4).value_t 
 		}
@@ -106,14 +106,13 @@ class FLYGeneratorJs extends AbstractGenerator {
 			memory = (environment.right as DeclarationObject).features.get(7).value_t
 			timeout = (environment.right as DeclarationObject).features.get(8).value_t					
 		} 
-		else if(cluster){
+		if(env == "kubernetes"){
 			env = (environment.right as DeclarationObject).features.get(0).value_s
 			language = (environment.right as DeclarationObject).features.get(1).value_s
 			nreplicas = (environment.right as DeclarationObject).features.get(2).value_t
 			nparallels = (environment.right as DeclarationObject).features.get(3).value_t 
 			}
-			else{
-			env = "smp"
+		if(env == "env"){
 			language = (environment.right as DeclarationObject).features.get(2).value_s
 			nthread = (environment.right as DeclarationObject).features.get(1).value_t
 		}
@@ -234,9 +233,12 @@ class FLYGeneratorJs extends AbstractGenerator {
 			var __axios = require("axios");
 			var __qs = require("qs");
 			«ENDIF»
+			«IF env.equals("azure") || env.equals("aws")»
 			var __util = require("util");
 			var __dataframe = require("dataframe-js").DataFrame;
 			var __mysql = require("mysql");
+			«ENDIF»
+			
 			«FOR req: exps.expressions.filter(RequireExpression)»
 			
 			«ENDFOR»
@@ -1603,13 +1605,7 @@ class FLYGeneratorJs extends AbstractGenerator {
 	    if [ $? -eq 0 ]; then
 	         echo "Cluster is on and fine, Checking info..."
 	         kubectl cluster-info
-	         read -p "Continue? [y/n]" -n 1 -r
-	         echo    # (optional) move to a new line
-	         if [[ ! $REPLY =~ ^[Yy]$ ]]
-	            then
-	                exit 1
-	            fi
-	        else
+	    else
 	                echo "Cluster is not reachable..."
 	                exit 1
 	        fi
@@ -1618,26 +1614,21 @@ class FLYGeneratorJs extends AbstractGenerator {
 		if [ $? -eq 0 ]; then
 	         echo "Registry is on and fine, Checking info..."
 	         az acr check-health --name FlyRegistry --ignore-errors --yes
-	         read -p "Continue? [y/n]" -n 1 -r
-	         echo    # (optional) move to a new line
-	         if [[ ! $REPLY =~ ^[Yy]$ ]]
-	            then
-	                exit 1
-	            fi
+	        
 		else
 			      echo "Problems with the registry..."
 			      exit 1
 		fi
 	    echo "All right! We are starting!"
 	    echo "Entering in the Node env"
-		echo "Generating Js code...
+		echo "Generating Js code..."
 		echo '«generateBodyJs(resource,root.body,root.parameters,name,env)»
 					«FOR fd:functionCalled.values()»
 						
 					«generateJsExpression(fd, name)»
 					
 					«ENDFOR»
-		" > main.js
+		' > main.js
 		
 	    echo "Js file created"
 	    echo "Building and pushing the flying image"
@@ -1659,8 +1650,8 @@ class FLYGeneratorJs extends AbstractGenerator {
 		kubectl apply -f node.yaml
 		echo "We are Flying!! :)"
 		kubectl wait --for=condition=complete --timeout=120s -f node.yaml
-		kubectl logs job/static-demo
-		rm -f node.yaml temp.yml template.yaml
+		kubectl logs job/fly-job
+		rm -f node.yaml temp.yml template.yaml Dockerfile kubernetes_deploy.sh
 		'''
 	}
 	
@@ -1670,9 +1661,7 @@ class FLYGeneratorJs extends AbstractGenerator {
 		MAINTAINER Luigi Barbato <l.barbato11@studenti.unisa.it>
 		EXPOSE 8888
 		WORKDIR /function
-		COPY package.json package.json
-		RUN npm install
-		COPY . .
+		COPY ./main.js .
 		CMD ["node", "main.js"]
 		'''
 	}
@@ -1693,7 +1682,7 @@ class FLYGeneratorJs extends AbstractGenerator {
    	    spec:
    	      containers:
    	        - name: fly-node
-   	          image: ${registryName}/fly_node
+   	          image: ${registryName}.azurecr.io/fly_node
    	          command: [ "node", "./main.js" ]
    	      restartPolicy: Never
    	'''
