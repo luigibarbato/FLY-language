@@ -65,9 +65,14 @@ class FLYGeneratorPython extends AbstractGenerator {
 	int nthread
 	int memory
 	int timeout
+	var right_env = ""
 	/*KUBERNETES ENVS*/
 	int nreplicas
 	int nparallels
+	String resourceGroup = ""
+	String clusterName = ""
+	String registryName = ""
+	
 	/*END*/
 	String user = null
 	Resource resourceInput
@@ -75,7 +80,7 @@ class FLYGeneratorPython extends AbstractGenerator {
 	boolean isCluster
 	boolean isAsync 
 	String env_name=""
-	var list_environment = new ArrayList<String>(Arrays.asList("smp","aws","aws-debug","azure","kubernetes"));
+	var list_environment = new ArrayList<String>(Arrays.asList("smp","aws","aws-debug","azure","k8s"));
 	ArrayList listParams = null
 	List<String> allReqs=null
 
@@ -87,6 +92,7 @@ class FLYGeneratorPython extends AbstractGenerator {
 		typeSystem = scoping
 		id_execution = id
 		env_name=environment.name
+		env = (environment.right as DeclarationObject).features.get(0).value_s
 		if (!local && !cluster) {
 			env = (environment.right as DeclarationObject).features.get(0).value_s
 			user = (environment.right as DeclarationObject).features.get(1).value_s
@@ -95,12 +101,21 @@ class FLYGeneratorPython extends AbstractGenerator {
 			memory = (environment.right as DeclarationObject).features.get(7).value_t
 			timeout = (environment.right as DeclarationObject).features.get(8).value_t					
 		} 
-		else if(cluster){
+		if(env == "k8s"){
 			env = (environment.right as DeclarationObject).features.get(0).value_s
-			language = (environment.right as DeclarationObject).features.get(1).value_s
-			nreplicas = (environment.right as DeclarationObject).features.get(2).value_t
-			nparallels = (environment.right as DeclarationObject).features.get(3).value_t 
-			}
+			right_env = ((environment.environment.get(0).right as DeclarationObject).features.get(0) as DeclarationFeature).value_s
+			resourceGroup = (environment.right as DeclarationObject).features.get(1).value_s
+			clusterName = (environment.right as DeclarationObject).features.get(2).value_s
+			registryName = (environment.right as DeclarationObject).features.get(3).value_s
+			switch (right_env){
+				case "azure":
+				{
+				 nparallels = ((environment.environment.get(0).right as DeclarationObject).features.get(7) as DeclarationFeature).value_t
+				 nreplicas = ((environment.environment.get(0).right as DeclarationObject).features.get(7) as DeclarationFeature).value_t
+				}
+				}
+				
+				}
 		else{
 			env = "smp"
 			language = (environment.right as DeclarationObject).features.get(2).value_s
@@ -136,17 +151,25 @@ class FLYGeneratorPython extends AbstractGenerator {
 		
 		if(env.equals("azure"))
 			allReqs.add("azure-storage-queue")
+		if(env.equals("k8s"))
+			allReqs.add("redis")
+			
 		saveToRequirements(allReqs, fsa)
 		println(root.name)
 		if (isLocal) {
 			fsa.generateFile(root.name + ".py", input.compilePython(root.name, true))	
-		}else {
-			if(env.equals("aws-debug"))
-				fsa.generateFile("docker-compose-script.sh",input.compileDockerCompose())
+		}
+		if(env.equals("k8s")){
 			
+			fsa.generateFile("Dockerfile", input.compileDockerTemplate())
+			fsa.generateFile("template.yaml", input.compileK8sJobTemplate())
+			fsa.generateFile("kubernetes_deploy.sh", input.compileScriptDeploy(root.name, false))
+			}
+		else{
 			fsa.generateFile(root.name +"_"+ env_name +"_deploy.sh", input.compileScriptDeploy(root.name, false))
 			fsa.generateFile(root.name +"_"+ env_name + "_undeploy.sh", input.compileScriptUndeploy(root.name, false))
-		}
+			
+			}
 	}
 	
 	def channelsNames(BlockExpression exps) {
@@ -279,17 +302,29 @@ class FLYGeneratorPython extends AbstractGenerator {
 			
 			«IF env.contains("aws")»				
 			import boto3
+			«ENDIF»
+			
+			«IF env.contains("k8s")»				
+			import redis
+			«ENDIF»
+
 			«IF env.equals("aws")»
 				__sqs = boto3.resource('sqs', verify=False)
 				__rds = boto3.client('rds', verify=False)
-			«ELSE»
+			«ELSEIF !env.equals("k8s")»
 				__sqs = boto3.resource('sqs',endpoint_url='http://192.168.0.1:4576')
 			«ENDIF»
-
+			«IF env.contains("k8s")»				
+			redisClient = redis.StrictRedis(host='redis',port=6379)
+			«ENDIF»
+			«IF !env.contains("k8s")»				
+						
 			«FOR chName : channelNames»
-				«chName» = __sqs.get_queue_by_name(QueueName='«chName»-"${id}"')
-			«ENDFOR»
-			«ELSEIF env == "azure"»
+					«chName» = __sqs.get_queue_by_name(QueueName='«chName»-"${id}"')
+				«ENDFOR»
+			«ENDIF»
+				
+			«IF env == "azure"»
 			import azure.functions as func
 			from azure.storage.queue import QueueServiceClient
 			«ENDIF»
@@ -305,6 +340,8 @@ class FLYGeneratorPython extends AbstractGenerator {
 				__event = req.get_json()
 				data = __event['data']
 			«ENDIF»
+			«IF !env.contains("k8s")»				
+			
 				«FOR exp : parameters»
 					«IF typeSystem.get(name).get((exp as VariableDeclaration).name).equals("Table") || typeSystem.get(name).get((exp as VariableDeclaration).name).equals("File")»
 						__columns = data[0].keys()
@@ -335,6 +372,33 @@ class FLYGeneratorPython extends AbstractGenerator {
 					__queue_service_client = __queue_service.get_queue_client('termination-"${function}"-"${id}"')
 					__queue_service_client.send_message('terminate')
 				«ENDIF»
+				«ELSE»
+				«FOR exp : parameters»
+«IF typeSystem.get(name).get((exp as VariableDeclaration).name).equals("Table") || typeSystem.get(name).get((exp as VariableDeclaration).name).equals("File")»
+__columns = data[0].keys()
+«(exp as VariableDeclaration).name» = pd.read_json(json.dumps(data))
+«(exp as VariableDeclaration).name» = «(exp as VariableDeclaration).name»[__columns]
+«ELSEIF  typeSystem.get(name).get((exp as VariableDeclaration).name).contains("Matrix")»
+__«(exp as VariableDeclaration).name»_matrix = data[0]
+__«(exp as VariableDeclaration).name»_rows = data[0]['rows']
+__«(exp as VariableDeclaration).name»_cols = data[0]['cols']
+__«(exp as VariableDeclaration).name»_values = data[0]['values']
+__index = 0
+«(exp as VariableDeclaration).name» = [None] * (__«(exp as VariableDeclaration).name»_rows * __«(exp as VariableDeclaration).name»_cols)
+for __i in range(__«(exp as VariableDeclaration).name»_rows):
+for __j in range(__«(exp as VariableDeclaration).name»_cols):
+«(exp as VariableDeclaration).name»[__i*__«(exp as VariableDeclaration).name»_cols+__j] = __«(exp as VariableDeclaration).name»_values[__index]['value']
+__index+=1
+«ELSE»
+«(exp as VariableDeclaration).name» = data # TODO check
+«ENDIF»
+«ENDFOR»
+«FOR exp : exps.expressions»
+«generatePyExpression(exp,name, local)»
+«ENDFOR»			
+«ENDIF»
+				
+				
 		'''
 	}
 
@@ -370,7 +434,10 @@ class FLYGeneratorPython extends AbstractGenerator {
 			«ELSEIF env=="azure"»
 			__queue_service_client = __queue_service.get_queue_client('«exp.target.name»-"${id}"')
 			__queue_service_client.send_message(«generatePyArithmeticExpression(exp.expression, scope, local)»)
+			«ELSEIF env=="k8s"»
+					redisClient.lpush('queue:jobs',«generatePyArithmeticExpression(exp.expression, scope, local)»)
 			«ENDIF»
+	
 
 			'''
 		} else if (exp instanceof VariableDeclaration) {
@@ -461,14 +528,6 @@ class FLYGeneratorPython extends AbstractGenerator {
 								«exp.name» = urllib.request.urlopen(urllib.request.Request(«path»,headers={'Content-Type':'application/x-www-form-urlencoded;charset=utf-8'}))
 							else:
 								«exp.name» = open(«path»,'rw')'''
-						}
-						case "kubernetes":{
-							var n_replicas = ((exp.right as DeclarationObject).features.get(2) as DeclarationFeature).value_s
-							var n_parallels = ((exp.right as DeclarationObject).features.get(3) as DeclarationFeature).value_s
-							
-							return '''
-							ciao'''
-							
 						}
 						case "sql":{
 							if (exp.onCloud && (exp.environment.get(0).right as DeclarationObject).features.get(0).value_s.contains("aws")){
@@ -1228,11 +1287,18 @@ class FLYGeneratorPython extends AbstractGenerator {
 	'''
 	
 	def CharSequence compileScriptDeploy(Resource resource, String name, boolean local){
+		println("current env: " + env);
+		println("current right_env: " + right_env);
 		switch this.env {
 		   case "aws": AWSDeploy(resource,name,local,false)
 		   case "aws-debug": AWSDebugDeploy(resource,name,local,true)
 		   case "azure": AzureDeploy(resource,name,local)
-		   case "kubernetes": KubernetesDeploy(resource,name,local,false)
+		   case "k8s": {
+		   	if(right_env.contains("local"))
+		   		K8sDeploy(resource,name,false)
+		   	if(right_env.contains("azure"))
+		   		K8sAzureDeploy(resource,name,false)
+		   }
 		   default: this.env+" not supported"
   		}
 	} 	
@@ -1415,7 +1481,7 @@ class FLYGeneratorPython extends AbstractGenerator {
 	rm rolePolicyDocument.json
 	rm policyDocument.json
 	'''
-	def CharSequence KubernetesDeploy(Resource resource, String name, boolean local, boolean debug)
+	def CharSequence K8sDeploy(Resource resource, String name, boolean local)
 	'''
 	#!/bin/bash
 	
@@ -1439,15 +1505,7 @@ class FLYGeneratorPython extends AbstractGenerator {
 	     echo "Kube has something wrong :("
 	     exit 1
 	fi
-	
-	echo "checking if Registry is on and fine ..."
-	curl http://localhost:5000/v2/_catalog > /dev/null 2>&1 # renderlo un servizio con ip/dns fisso
-	if [ $? -eq 0 ]; then
-		echo "Registry is on :) continuing..."
-	else
-	     echo "Registry doesn't responding... :("
-	     exit 1
-	fi
+
 	echo "Entering in the Python env"
 	cd python
 	echo "Generating Python code...
@@ -1462,19 +1520,98 @@ class FLYGeneratorPython extends AbstractGenerator {
 	
 	echo "Python file created"
 	echo "Building and pushing the flying image"
-	
-	docker build -t fly_python . 
-	docker tag fly_python localhost:5000/fly_python
-	docker push localhost:5000/fly_python
-	
-	echo "it's the moment:"
-	
-	kubectl apply -f python.yaml
-	
-	echo "We are Flying!! :)"
+		    az acr build --registry «registryName» --image fly_node .
+		    
+		    echo "it's the moment:"
+		    
+			export completions=«nreplicas»
+			export parallelism=«nparallels»
+			export registryName=«registryName»
+			
+			( echo "cat <<EOF >python.yaml";
+			  cat template.yaml;
+			  echo "EOF";
+			) >temp.yml
+			. temp.yml
+			cat python.yaml
+			
+			kubectl apply -f node.yaml
+			echo "We are Flying!! :)"
+			kubectl wait --for=condition=complete --timeout=120s -f node.yaml
+			kubectl logs job/fly-job
+			rm -f node.yaml temp.yml template.yaml Dockerfile kubernetes_deploy.sh main.py
 	
 	'''
+	def CharSequence K8sAzureDeploy(Resource resource, String name, boolean local)
+	'''
+	#!/bin/bash
 	
+	echo "checking if Docker is on and fine ..."
+	docker info > /dev/null 2>&1
+	
+	if [ $? -eq 0 ]; then
+		echo "Docker is on :) continuing..."
+	else
+	     echo "Docker doesn't responding... :("
+	     exit 1
+	fi
+	
+	
+	echo "checking if Kubernetes is on and fine ..."
+	kubectl cluster-info > /dev/null 2>&1 #Da rivedere in caso il cluster non sia in locale
+	
+	if [ $? -eq 0 ]; then
+		echo "Kube says hello :) continuing..."
+	else
+	     echo "Kube has something wrong :("
+	     exit 1
+	fi
+	echo "launching Redis deployment..."
+	kubectl apply -f https://kubernetes.io/examples/application/job/redis/redis-pod.yaml
+	kubectl apply -f https://kubernetes.io/examples/application/job/redis/redis-service.yaml
+		
+	if [ $? -eq 0 ]; then
+		echo "Redis says hello :) continuing..."
+	else
+		    echo "Redis has something wrong :("
+		    exit 1
+	fi
+	echo "Entering in the Python env"
+	cd src-gen/
+	echo "Generating Python code..."
+	echo "«generateBodyPy(root.body,root.parameters,name,env, local)»
+	
+	«FOR fd:functionCalled.values()»
+		
+	«generatePyExpression(fd, name, local)»
+	
+	«ENDFOR»
+	" > main.py
+	
+	echo "Python file created"
+	echo "Building and pushing the flying image"
+		    az acr build --registry «registryName» --image fly_python .
+		    
+		    echo "it's the moment:"
+		    
+			export completions=«nreplicas»
+			export parallelism=«nparallels»
+			export registryName=«registryName»
+			
+			( echo "cat <<EOF >python.yaml";
+			  cat template.yaml;
+			  echo "EOF";
+			) >temp.yml
+			. temp.yml
+			cat python.yaml
+			
+			kubectl apply -f python.yaml
+			echo "We are Flying!! :)"
+			kubectl wait --for=condition=complete --timeout=120s -f python.yaml
+			kubectl logs job/fly-job
+			rm -f python.yaml temp.yml template.yaml Dockerfile kubernetes_deploy.sh main.py
+	
+	'''
 	def CharSequence AWSDebugDeploy(Resource resource, String name, boolean local, boolean debug)
 	'''
 	#!/bin/bash
@@ -1686,8 +1823,39 @@ class FLYGeneratorPython extends AbstractGenerator {
 	     
 	docker-compose up
 	'''
-	
-	
+		def CharSequence compileDockerTemplate(Resource resource){
+		'''
+		FROM python:3.8-slim-buster
+		MAINTAINER Luigi Barbato <l.barbato11@studenti.unisa.it>
+		WORKDIR /function
+		COPY requirements.txt requirements.txt
+		RUN pip3 install -r requirements.txt
+		COPY . .
+		CMD ["python3", "main.py"]
+		'''
+	}
+	   def CharSequence compileK8sJobTemplate(Resource resource){
+   	'''
+   	apiVersion: batch/v1
+   	kind: Job
+   	metadata:
+   	  name: fly-job
+   	spec:
+   	  parallelism: ${parallelism}
+   	  completions: ${completions}
+   	  template:
+   	    metadata:
+   	      name: fly
+   	      labels:
+   	        jobgroup: fly
+   	    spec:
+   	      containers:
+   	        - name: fly-python
+   	          image: ${registryName}/fly_python
+   	          command: [ "python3", "./main.py" ]
+   	      restartPolicy: Never
+   	'''
+   }
 	def CharSequence AzureDeploy(Resource resource, String name, boolean local)
 	'''
 		#!/bin/bash
