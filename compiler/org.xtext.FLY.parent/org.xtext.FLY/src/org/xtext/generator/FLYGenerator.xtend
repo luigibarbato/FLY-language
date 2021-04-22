@@ -82,7 +82,7 @@ class FLYGenerator extends AbstractGenerator {
 	var id_execution = System.currentTimeMillis
 	var last_func_result = null
 	var deployed_function = new HashMap<String,ArrayList<String>>();
-	var list_environment = new ArrayList<String>(Arrays.asList("smp","aws","aws-debug","azure","kubernetes","k8s-azure"));
+	var list_environment = new ArrayList<String>(Arrays.asList("smp","aws","aws-debug","azure","k8s","k8s-azure")); 
 	Resource res = null
 
 	override void doGenerate(Resource resource, IFileSystemAccess2 fsa, IGeneratorContext context) {
@@ -119,14 +119,10 @@ class FLYGenerator extends AbstractGenerator {
 							language = ((element.environment.right as DeclarationObject).features.get(6) as DeclarationFeature).value_s;
 							
 						}
-						case "kubernetes":{
-							language = ((element.environment.right as DeclarationObject).features.get(1) as DeclarationFeature).value_s;
+						case "k8s":{
+							language = ((element.environment.environment.get(0).right as DeclarationObject).features.get(6) as DeclarationFeature).value_s
 							
-						}
-						case "k8s-azure":{
-							language = ((element.environment.right as DeclarationObject).features.get(2) as DeclarationFeature).value_s;
-							
-						}
+						}					
 					}
 				//generate .js or .py file
 					if (language.contains("python")){
@@ -141,7 +137,130 @@ class FLYGenerator extends AbstractGenerator {
 		
 	
 	
-		
+	def CharSequence compileK8SJava(Resource resource)'''
+	import java.io.File;
+		import java.io.FileInputStream;
+		import java.io.InputStreamReader;
+		import java.io.FileOutputStream;
+		import java.io.OutputStreamWriter;
+		import java.io.IOException;
+		import java.nio.ByteBuffer;
+		import java.nio.channels.FileChannel;
+		import java.nio.file.StandardOpenOption;
+		import java.io.InputStream;
+		import java.net.ServerSocket;
+		import java.net.Socket;
+		import java.io.BufferedReader;
+		import java.util.ArrayList;
+		import java.util.Arrays;
+		import java.util.List;
+		import java.util.zip.ZipEntry;
+		import java.util.zip.ZipOutputStream;
+		import java.io.BufferedWriter;
+		import java.io.FileWriter;
+		import java.io.IOException;
+		import java.util.HashMap;
+		import java.time.LocalDate;
+		import tech.tablesaw.api.Table;
+		import tech.tablesaw.io.csv.CsvReadOptions;
+		import tech.tablesaw.io.csv.CsvWriteOptions;
+		import tech.tablesaw.columns.Column;
+		import tech.tablesaw.selection.Selection;
+		import tech.tablesaw.table.Rows;
+		import tech.tablesaw.api.Row;
+		import java.util.concurrent.LinkedTransferQueue;
+		import java.util.concurrent.ExecutorService;
+		import java.util.concurrent.Executors;
+		import java.util.concurrent.ExecutionException;
+		import java.util.ArrayList;
+		import java.util.List;
+		import java.util.concurrent.Callable;
+		import java.util.concurrent.Future;
+		import java.util.concurrent.atomic.AtomicInteger;
+		import java.util.Random;
+		import java.util.Collections;
+		import java.util.Comparator;
+		import java.util.Map;
+		import java.util.Scanner;
+		import org.apache.commons.io.FileUtils;
+		import org.apache.commons.io.FileUtils;
+		import java.sql.*;
+		import redis.clients.jedis.*;
+	public class «name» {
+				
+				static HashMap<String,HashMap<String, Object>> __fly_environment = new HashMap<String,HashMap<String,Object>>();
+				static HashMap<String,HashMap<String,Integer>> __fly_async_invocation_id = new HashMap<String,HashMap<String,Integer>>();
+				static final String __environment = "smp";
+				static long  __id_execution =  System.currentTimeMillis();
+
+				public static void main(String[] args) throws Exception{
+
+					«IF isK8s()»
+					Runtime.getRuntime().exec("chmod +x src-gen/kubernetes_deploy.sh");
+									ProcessBuilder __processBuilder_kubernetes_deployer = new ProcessBuilder("/bin/bash", "-c", "src-gen/kubernetes_deploy.sh");
+									Map<String, String> __env_kubernetes_deployer = __processBuilder_kubernetes_deployer.environment();
+									String __path_env_kubernetes_deployer = __env_kubernetes_deployer.get("PATH");
+									if (!__path_env_kubernetes_deployer.contains("/usr/local/bin")) {
+										 __env_kubernetes_deployer.put("PATH", __path_env_kubernetes_deployer+":/usr/local/bin");
+									}
+									Process __p_kubernetes_deployer;
+									try {
+										__p_kubernetes_deployer = __processBuilder_kubernetes_deployer.start();
+										BufferedReader __p_kubernetes_deployer_output = new BufferedReader(new InputStreamReader(__p_kubernetes_deployer.getInputStream()));
+										String __kubernetes_deployer_output_line = __p_kubernetes_deployer_output.readLine();
+										while(__kubernetes_deployer_output_line !=null) {
+											System.out.println(__kubernetes_deployer_output_line);
+											__kubernetes_deployer_output_line=__p_kubernetes_deployer_output.readLine();
+										}
+									} catch (Exception e) {
+										e.printStackTrace();
+									}
+					 ProcessBuilder processBuilder = new ProcessBuilder();
+					        processBuilder.command("bash", "-c", "kubectl get service/public-svc -o jsonpath='{.status.loadBalancer.ingress[*].ip}'");
+					        try {
+					
+					            Process process = processBuilder.start();
+					
+					            StringBuilder svcIP = new StringBuilder();
+					
+					            BufferedReader reader = new BufferedReader(
+					                    new InputStreamReader(process.getInputStream()));
+					
+					            String line;
+					            while ((line = reader.readLine()) != null) {
+					                svcIP.append(line);
+					            }
+					
+					            int exitVal = process.waitFor();
+					            if (exitVal == 0) {
+					                System.out.println("Success!");
+					                System.out.print(svcIP);
+					            } else {
+					                //abnormal...
+					            }
+					
+					        } catch (IOException e) {
+					            e.printStackTrace();
+					        } catch (InterruptedException e) {
+					            e.printStackTrace();
+					        }		
+					«ENDIF»
+								«FOR element : (resource.allContents.toIterable.filter(Expression))»
+									«IF element instanceof VariableDeclaration»
+										«IF element.right instanceof DeclarationObject 
+											&& ( (element.right as DeclarationObject).features.get(0).value_s.equals("channel") || list_environment.contains((element.right as DeclarationObject).features.get(0).value_s) )»
+											«generateVariableDeclaration(element,"main")»
+										«ENDIF»
+									«ENDIF»
+								«ENDFOR»
+			«FOR element : resource.allContents.toIterable.filter(FunctionDefinition)»
+				«IF checkBlock(element.eContainer)==false»
+					«generateFunctionDefinition(element)»
+				«ENDIF»	
+			«ENDFOR»						
+	}
+	}	
+	'''	
 	def CharSequence compileJava(Resource resource) '''
 	import java.io.File;
 	import java.io.FileInputStream;
@@ -252,6 +371,9 @@ class FLYGenerator extends AbstractGenerator {
 	import com.microsoft.azure.management.resources.fluentcore.arm.Region;
 	import isislab.azureclient.AzureClient;
 		«ENDIF»
+		«IF isK8s()»
+	import redis.clients.jedis.*;
+		«ENDIF»
 		
 		public class «name» {
 			
@@ -302,7 +424,7 @@ class FLYGenerator extends AbstractGenerator {
 				}		
 				«ENDIF»
 				
-				«IF isKubernetes()»
+				«IF isK8s()»
 				Runtime.getRuntime().exec("chmod +x src-gen/kubernetes_deploy.sh");
 								ProcessBuilder __processBuilder_kubernetes_deployer = new ProcessBuilder("/bin/bash", "-c", "src-gen/kubernetes_deploy.sh");
 								Map<String, String> __env_kubernetes_deployer = __processBuilder_kubernetes_deployer.environment();
@@ -317,16 +439,59 @@ class FLYGenerator extends AbstractGenerator {
 									String __kubernetes_deployer_output_line = __p_kubernetes_deployer_output.readLine();
 									while(__kubernetes_deployer_output_line !=null) {
 										System.out.println(__kubernetes_deployer_output_line);
-										if (__kubernetes_deployer_output_line.contains("wrong."))
-											break;
 										__kubernetes_deployer_output_line=__p_kubernetes_deployer_output.readLine();
 									}
 								} catch (Exception e) {
 									e.printStackTrace();
-								}		
-				«ENDIF»
-				
-				
+								}
+								StringBuilder svcIP = new StringBuilder();
+								ProcessBuilder processBuilder = new ProcessBuilder();
+													        processBuilder.command("bash", "-c", "kubectl get service/public-svc -o jsonpath='{.status.loadBalancer.ingress[*].ip}'");
+													        try {
+													
+													            Process process = processBuilder.start();
+													
+													
+													            BufferedReader reader = new BufferedReader(
+													                    new InputStreamReader(process.getInputStream()));
+													
+													            String line;
+													            while ((line = reader.readLine()) != null) {
+													                svcIP.append(line);
+													            }
+													
+													            int exitVal = process.waitFor();
+													            if (exitVal == 0) {
+													                System.out.println("Success!");
+													                System.out.println("The service IP exposed is: " + svcIP);
+													            } else {
+													                //abnormal...
+													            }
+													
+													        } catch (IOException e) {
+													            e.printStackTrace();
+													        } catch (InterruptedException e) {
+													            e.printStackTrace();
+													        }		
+				«FOR element : resource.allContents.toIterable.filter(VariableDeclaration).filter[right instanceof DeclarationObject].
+				filter[list_environment.contains((right as DeclarationObject).features.get(0).value_s)]»
+					«setEnvironmentDeclarationInfo(element)»
+				«ENDFOR»
+				«FOR element: resource.allContents.toIterable.filter(VariableDeclaration).filter[onCloud].filter[right instanceof DeclarationObject].
+				filter[(right as DeclarationObject).features.get(0).value_s.equals("channel")]»
+					«IF !(element.environment.get(0).right as DeclarationObject).features.get(0).equals("smp")»
+					«generateChanelDeclarationForCloud(element)»
+					«ELSEIF (element.environment.get(0).right as DeclarationObject).features.get(0).equals("smp") &&
+						(element.environment.get(0).right as DeclarationObject).features.length==3»
+						«generateChannelDeclarationForLanguage(element)»
+					«ENDIF»
+				«ENDFOR»
+			«FOR element : resource.allContents.toIterable.filter(FunctionDefinition)»
+				«IF checkBlock(element.eContainer)==false»
+					«generateFunctionDefinition(element)»
+				«ENDIF»	
+			«ENDFOR»															
+			«ELSE»	
 				«FOR element : resource.allContents.toIterable.filter(VariableDeclaration).filter[right instanceof DeclarationObject].
 				filter[list_environment.contains((right as DeclarationObject).features.get(0).value_s)]»
 					«setEnvironmentDeclarationInfo(element)»
@@ -372,6 +537,7 @@ class FLYGenerator extends AbstractGenerator {
 					}
 					System.out.println("Deploy effettuato");
 				«ENDIF»
+				
 				«FOR element: resource.allContents.toIterable.filter(VariableDeclaration).filter[onCloud].filter[right instanceof DeclarationObject].
 				filter[(right as DeclarationObject).features.get(0).value_s.equals("channel")]»
 					«IF !(element.environment.get(0).right as DeclarationObject).features.get(0).equals("smp")»
@@ -381,7 +547,7 @@ class FLYGenerator extends AbstractGenerator {
 						«generateChannelDeclarationForLanguage(element)»
 					«ENDIF»
 				«ENDFOR»
-				«FOR element: resource.allContents.toIterable.filter(FlyFunctionCall).filter[!(environment.right as DeclarationObject).features.get(0).value_s.equals("smp")]»
+				«FOR element: resource.allContents.toIterable.filter(FlyFunctionCall).filter[!(environment.right as DeclarationObject).features.get(0).value_s.equals("smp") && !(environment.right as DeclarationObject).features.get(0).value_s.equals("k8s")]»
 						«generateTerminationQueue(element)»
 				«ENDFOR»
 				
@@ -407,6 +573,7 @@ class FLYGenerator extends AbstractGenerator {
 					«generateFunctionDefinition(element)»
 				«ENDIF»	
 			«ENDFOR»	
+	«ENDIF»
 
 			private static String __generateString(Table t,int id) {
 				StringBuilder b = new StringBuilder();
@@ -677,6 +844,7 @@ class FLYGenerator extends AbstractGenerator {
 							static ExecutorService __thread_pool_«dec.name» = Executors.newFixedThreadPool(«((dec.right as DeclarationObject).features.get(1)).value_t»);
 							'''
 					}
+
 					case "aws-debug":{
 						var access_id_key = ((dec.right as DeclarationObject).features.get(2) as DeclarationFeature).value_s
 						var secret_access_key = ((dec.right as DeclarationObject).features.get(3) as DeclarationFeature).value_s
@@ -1445,7 +1613,7 @@ class FLYGenerator extends AbstractGenerator {
 				
 			'''
 		}
-		else if (env.contains("kubernetes")) {
+		else if (env.contains("k8s")) {
 			var language =  ((dec.right as DeclarationObject).features.get(1) as DeclarationFeature).value_s
 			var nreplicas = ((dec.right as DeclarationObject).features.get(2) as DeclarationFeature).value_t
 			var nparallels= ((dec.right as DeclarationObject).features.get(3) as DeclarationFeature).value_t
@@ -1456,21 +1624,7 @@ class FLYGenerator extends AbstractGenerator {
 				__fly_environment.get("«dec_name»").put("nparallels",«nparallels»);
 			'''
 			}
-		else if (env.contains("k8s-azure")) {
-			var registryName= ((dec.right as DeclarationObject).features.get(1) as DeclarationFeature).value_s
-			var language =  ((dec.right as DeclarationObject).features.get(2) as DeclarationFeature).value_s
-			var nreplicas = ((dec.right as DeclarationObject).features.get(3) as DeclarationFeature).value_t
-			var nparallels = ((dec.right as DeclarationObject).features.get(4) as DeclarationFeature).value_t
-			
-			return '''
-				__fly_environment.put("«dec_name»", new HashMap<String,Object>());
-				__fly_environment.get("«dec_name»").put("registryName","«registryName»");
-				__fly_environment.get("«dec_name»").put("language","«language»");
-				__fly_environment.get("«dec_name»").put("nreplicas",«nreplicas»);
-				__fly_environment.get("«dec_name»").put("nparallels",«nparallels»);
-				
-			'''
-			}
+
 		else if (env.equals("azure")){
 			var threads = ((dec.right as DeclarationObject).features.get(7) as DeclarationFeature).value_t
 //			var memory = ((dec.right as DeclarationObject).features.get(7) as DeclarationFeature).value_t
@@ -1525,6 +1679,15 @@ class FLYGenerator extends AbstractGenerator {
 			filter[(right as DeclarationObject).features.get(0).value_s.equals("smp")].get(0)
 		var local = local_env.name
 		switch env {
+			case "k8s":
+			return '''
+			Jedis jedis = new Jedis(svcIP,6379);
+			for(int __i=0;__i< (Integer)__fly_environment.get("cloud").get("nthread");__i++){ 
+			«dec.name».put(jedis.rpop("queue:jobs"));
+			}
+			estimation();
+			}
+			'''
 			case "aws":
 			return '''
 				__sqs_«env_name».createQueue(new CreateQueueRequest("«dec.name»-"+__id_execution));
@@ -3515,11 +3678,11 @@ class FLYGenerator extends AbstractGenerator {
 		return false
 	}
 	
-	def Boolean isKubernetes(){
+	def Boolean isK8s(){
 			for(VariableDeclaration env: res.allContents.toIterable.filter(VariableDeclaration).filter[right instanceof DeclarationObject].
 				filter[list_environment.contains((right as DeclarationObject).features.get(0).value_s)]
 		){
-			if ((env.right as DeclarationObject).features.get(0).value_s.equals("kubernetes") || (env.right as DeclarationObject).features.get(0).value_s.equals("k8s-azure"))
+			if ((env.right as DeclarationObject).features.get(0).value_s.equals("k8s") || (env.right as DeclarationObject).features.get(0).value_s.equals("k8s-azure"))
 				return true
 		}
 		return false
