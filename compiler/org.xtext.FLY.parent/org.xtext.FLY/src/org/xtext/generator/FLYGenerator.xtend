@@ -1681,7 +1681,7 @@ class FLYGenerator extends AbstractGenerator {
 		switch env {
 			case "k8s":
 			return '''
-			Jedis jedis = new Jedis(svcIP,6379);
+			Jedis jedis = new Jedis(svcIP.toString(),6379);
 			for(int __i=0;__i< (Integer)__fly_environment.get("cloud").get("nthread");__i++){ 
 			«dec.name».put(jedis.rpop("queue:jobs"));
 			}
