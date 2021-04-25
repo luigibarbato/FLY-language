@@ -82,7 +82,8 @@ class FLYGenerator extends AbstractGenerator {
 	var id_execution = System.currentTimeMillis
 	var last_func_result = null
 	var deployed_function = new HashMap<String,ArrayList<String>>();
-	var list_environment = new ArrayList<String>(Arrays.asList("smp","aws","aws-debug","azure","k8s","k8s-azure")); 
+	var list_environment = new ArrayList<String>(Arrays.asList("smp","aws","aws-debug","azure","k8s"));
+	var right_env = ""
 	Resource res = null
 
 	override void doGenerate(Resource resource, IFileSystemAccess2 fsa, IGeneratorContext context) {
@@ -90,11 +91,9 @@ class FLYGenerator extends AbstractGenerator {
 			res = resource;
 			var name_extension = resource.URI.toString.split('/').last
 			name = name_extension.toString.split('.fly').get(0)
-			// generate .java file
-			typeSystem.put("main", new HashMap<String, String>())
-			fsa.generateFile(name + ".java", resource.compileJava)
 			// NDR
 			for (element : resource.allContents.toIterable.filter(FlyFunctionCall)) {
+				right_env = ((element.environment.environment.get(0).right as DeclarationObject).features.get(0) as DeclarationFeature).value_s
 				var type_env = ((element.environment.right as DeclarationObject).features.get(0) as DeclarationFeature).value_s;
 				var async = element.isAsync;
 				if(type_env.equals("smp") && ((element.environment.right as DeclarationObject).features.length==3)){
@@ -120,7 +119,11 @@ class FLYGenerator extends AbstractGenerator {
 							
 						}
 						case "k8s":{
+							if(right_env.contains("azure"))
 							language = ((element.environment.environment.get(0).right as DeclarationObject).features.get(6) as DeclarationFeature).value_s
+							else
+							language = ((element.environment.environment.get(0).right as DeclarationObject).features.get(2) as DeclarationFeature).value_s
+							
 							
 						}					
 					}
@@ -131,136 +134,15 @@ class FLYGenerator extends AbstractGenerator {
 						jsGen.generateJS(resource,fsa,context,name,element.target,element.environment,typeSystem,id_execution,false,async,true);
 					}
 				}
+						// generate .java file
+			typeSystem.put("main", new HashMap<String, String>())
+			fsa.generateFile(name + ".java", resource.compileJava)
 			}
 		}
 	}
 		
 	
-	
-	def CharSequence compileK8SJava(Resource resource)'''
-	import java.io.File;
-		import java.io.FileInputStream;
-		import java.io.InputStreamReader;
-		import java.io.FileOutputStream;
-		import java.io.OutputStreamWriter;
-		import java.io.IOException;
-		import java.nio.ByteBuffer;
-		import java.nio.channels.FileChannel;
-		import java.nio.file.StandardOpenOption;
-		import java.io.InputStream;
-		import java.net.ServerSocket;
-		import java.net.Socket;
-		import java.io.BufferedReader;
-		import java.util.ArrayList;
-		import java.util.Arrays;
-		import java.util.List;
-		import java.util.zip.ZipEntry;
-		import java.util.zip.ZipOutputStream;
-		import java.io.BufferedWriter;
-		import java.io.FileWriter;
-		import java.io.IOException;
-		import java.util.HashMap;
-		import java.time.LocalDate;
-		import tech.tablesaw.api.Table;
-		import tech.tablesaw.io.csv.CsvReadOptions;
-		import tech.tablesaw.io.csv.CsvWriteOptions;
-		import tech.tablesaw.columns.Column;
-		import tech.tablesaw.selection.Selection;
-		import tech.tablesaw.table.Rows;
-		import tech.tablesaw.api.Row;
-		import java.util.concurrent.LinkedTransferQueue;
-		import java.util.concurrent.ExecutorService;
-		import java.util.concurrent.Executors;
-		import java.util.concurrent.ExecutionException;
-		import java.util.ArrayList;
-		import java.util.List;
-		import java.util.concurrent.Callable;
-		import java.util.concurrent.Future;
-		import java.util.concurrent.atomic.AtomicInteger;
-		import java.util.Random;
-		import java.util.Collections;
-		import java.util.Comparator;
-		import java.util.Map;
-		import java.util.Scanner;
-		import org.apache.commons.io.FileUtils;
-		import org.apache.commons.io.FileUtils;
-		import java.sql.*;
-		import redis.clients.jedis.*;
-	public class «name» {
-				
-				static HashMap<String,HashMap<String, Object>> __fly_environment = new HashMap<String,HashMap<String,Object>>();
-				static HashMap<String,HashMap<String,Integer>> __fly_async_invocation_id = new HashMap<String,HashMap<String,Integer>>();
-				static final String __environment = "smp";
-				static long  __id_execution =  System.currentTimeMillis();
 
-				public static void main(String[] args) throws Exception{
-
-					«IF isK8s()»
-					Runtime.getRuntime().exec("chmod +x src-gen/kubernetes_deploy.sh");
-									ProcessBuilder __processBuilder_kubernetes_deployer = new ProcessBuilder("/bin/bash", "-c", "src-gen/kubernetes_deploy.sh");
-									Map<String, String> __env_kubernetes_deployer = __processBuilder_kubernetes_deployer.environment();
-									String __path_env_kubernetes_deployer = __env_kubernetes_deployer.get("PATH");
-									if (!__path_env_kubernetes_deployer.contains("/usr/local/bin")) {
-										 __env_kubernetes_deployer.put("PATH", __path_env_kubernetes_deployer+":/usr/local/bin");
-									}
-									Process __p_kubernetes_deployer;
-									try {
-										__p_kubernetes_deployer = __processBuilder_kubernetes_deployer.start();
-										BufferedReader __p_kubernetes_deployer_output = new BufferedReader(new InputStreamReader(__p_kubernetes_deployer.getInputStream()));
-										String __kubernetes_deployer_output_line = __p_kubernetes_deployer_output.readLine();
-										while(__kubernetes_deployer_output_line !=null) {
-											System.out.println(__kubernetes_deployer_output_line);
-											__kubernetes_deployer_output_line=__p_kubernetes_deployer_output.readLine();
-										}
-									} catch (Exception e) {
-										e.printStackTrace();
-									}
-					 ProcessBuilder processBuilder = new ProcessBuilder();
-					        processBuilder.command("bash", "-c", "kubectl get service/public-svc -o jsonpath='{.status.loadBalancer.ingress[*].ip}'");
-					        try {
-					
-					            Process process = processBuilder.start();
-					
-					            StringBuilder svcIP = new StringBuilder();
-					
-					            BufferedReader reader = new BufferedReader(
-					                    new InputStreamReader(process.getInputStream()));
-					
-					            String line;
-					            while ((line = reader.readLine()) != null) {
-					                svcIP.append(line);
-					            }
-					
-					            int exitVal = process.waitFor();
-					            if (exitVal == 0) {
-					                System.out.println("Success!");
-					                System.out.print(svcIP);
-					            } else {
-					                //abnormal...
-					            }
-					
-					        } catch (IOException e) {
-					            e.printStackTrace();
-					        } catch (InterruptedException e) {
-					            e.printStackTrace();
-					        }		
-					«ENDIF»
-								«FOR element : (resource.allContents.toIterable.filter(Expression))»
-									«IF element instanceof VariableDeclaration»
-										«IF element.right instanceof DeclarationObject 
-											&& ( (element.right as DeclarationObject).features.get(0).value_s.equals("channel") || list_environment.contains((element.right as DeclarationObject).features.get(0).value_s) )»
-											«generateVariableDeclaration(element,"main")»
-										«ENDIF»
-									«ENDIF»
-								«ENDFOR»
-			«FOR element : resource.allContents.toIterable.filter(FunctionDefinition)»
-				«IF checkBlock(element.eContainer)==false»
-					«generateFunctionDefinition(element)»
-				«ENDIF»	
-			«ENDFOR»						
-	}
-	}	
-	'''	
 	def CharSequence compileJava(Resource resource) '''
 	import java.io.File;
 	import java.io.FileInputStream;
@@ -446,7 +328,11 @@ class FLYGenerator extends AbstractGenerator {
 								}
 								StringBuilder svcIP = new StringBuilder();
 								ProcessBuilder processBuilder = new ProcessBuilder();
+															«IF (right_env != "smp")»
 													        processBuilder.command("bash", "-c", "kubectl get service/public-svc -o jsonpath='{.status.loadBalancer.ingress[*].ip}'");
+													        «ELSE»
+													        processBuilder.command("bash", "-c", "minikube ip");
+													        «ENDIF»
 													        try {
 													
 													            Process process = processBuilder.start();
@@ -472,7 +358,8 @@ class FLYGenerator extends AbstractGenerator {
 													            e.printStackTrace();
 													        } catch (InterruptedException e) {
 													            e.printStackTrace();
-													        }		
+													        }
+													        							        		
 				«FOR element : resource.allContents.toIterable.filter(VariableDeclaration).filter[right instanceof DeclarationObject].
 				filter[list_environment.contains((right as DeclarationObject).features.get(0).value_s)]»
 					«setEnvironmentDeclarationInfo(element)»
@@ -1679,7 +1566,8 @@ class FLYGenerator extends AbstractGenerator {
 			filter[(right as DeclarationObject).features.get(0).value_s.equals("smp")].get(0)
 		var local = local_env.name
 		switch env {
-			case "k8s":
+			case "k8s":{			
+			if(!right_env.contains("smp")){
 			return '''
 			Jedis jedis = new Jedis(svcIP.toString(),6379);
 			for(int __i=0;__i< (Integer)__fly_environment.get("cloud").get("nthread");__i++){ 
@@ -1688,6 +1576,19 @@ class FLYGenerator extends AbstractGenerator {
 			estimation();
 			}
 			'''
+			
+			}
+			else
+			return '''
+			Jedis jedis = new Jedis(svcIP.toString(),30014);
+			for(int __i=0;__i< (Integer)__fly_environment.get("local").get("nthread");__i++){ 
+			«dec.name».put(jedis.rpop("queue:jobs"));
+			}
+			estimation();
+			}
+			'''
+			
+			}
 			case "aws":
 			return '''
 				__sqs_«env_name».createQueue(new CreateQueueRequest("«dec.name»-"+__id_execution));
