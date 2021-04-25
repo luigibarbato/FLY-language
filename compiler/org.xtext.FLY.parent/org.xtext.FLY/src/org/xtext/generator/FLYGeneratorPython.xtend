@@ -113,6 +113,12 @@ class FLYGeneratorPython extends AbstractGenerator {
 				 nparallels = ((environment.environment.get(0).right as DeclarationObject).features.get(7) as DeclarationFeature).value_t
 				 nreplicas = ((environment.environment.get(0).right as DeclarationObject).features.get(7) as DeclarationFeature).value_t
 				}
+				case "smp":
+				{
+				language = (environment.right as DeclarationObject).features.get(2).value_s
+				 nparallels = ((environment.environment.get(0).right as DeclarationObject).features.get(1) as DeclarationFeature).value_t
+				 nreplicas = ((environment.environment.get(0).right as DeclarationObject).features.get(1) as DeclarationFeature).value_t
+				}
 				}
 				
 				}
@@ -403,11 +409,12 @@ __index+=1
 	}
 
 	def generatePyExpression(Expression exp, String scope, boolean local) {
+					println( "expr env: " + env)
 		
 		var s = ''''''
 		if (exp instanceof ChannelSend) {
 			var env = (exp.target.environment.get(0).right as DeclarationObject).features.get(0).value_s ;//(exp.target as DeclarationObject).features.get(0).value_s;
-			println(env)
+			println( "expr env: " + env)
 			s += '''			
 			«IF local»
 				«exp.target.name».write(json.dumps(«generatePyArithmeticExpression(exp.expression, scope, local)»).encode('utf8'))
@@ -437,7 +444,6 @@ __index+=1
 			«ELSEIF env=="k8s"»
 					redisClient.lpush('queue:jobs',«generatePyArithmeticExpression(exp.expression, scope, local)»)
 			«ENDIF»
-	
 
 			'''
 		} else if (exp instanceof VariableDeclaration) {
@@ -1294,9 +1300,9 @@ __index+=1
 		   case "aws-debug": AWSDebugDeploy(resource,name,local,true)
 		   case "azure": AzureDeploy(resource,name,local)
 		   case "k8s": {
-		   	if(right_env.contains("local"))
+		   	if(right_env.contains("smp"))
 		   		K8sDeploy(resource,name,false)
-		   	if(right_env.contains("azure"))
+		   	else if(right_env.contains("azure"))
 		   		K8sAzureDeploy(resource,name,false)
 		   }
 		   default: this.env+" not supported"
@@ -1505,9 +1511,11 @@ __index+=1
 	     echo "Kube has something wrong :("
 	     exit 1
 	fi
-
+	cd src-gen/
+	echo "launching Redis deployment..."
+	kubectl apply -f https://kubernetes.io/examples/application/job/redis/redis-pod.yaml
+	echo "«generateIntK8Service(resource)»" > int-svc.yaml
 	echo "Entering in the Python env"
-	cd python
 	echo "Generating Python code...
 	echo "«generateBodyPy(root.body,root.parameters,name,env, local)»
 	
@@ -1520,9 +1528,11 @@ __index+=1
 	
 	echo "Python file created"
 	echo "Building and pushing the flying image"
-		    az acr build --registry «registryName» --image fly_node .
-		    
-		    echo "it's the moment:"
+	
+	docker build -t fly_node . 
+	docker tag fly_node «registryName»/fly_python
+	docker push «registryName»/fly_python   
+    echo "it's the moment:"
 		    
 			export completions=«nreplicas»
 			export parallelism=«nparallels»
@@ -1535,11 +1545,13 @@ __index+=1
 			. temp.yml
 			cat python.yaml
 			
-			kubectl apply -f node.yaml
+			kubectl apply -f int-svc.yaml
+			kubectl apply -f python.yaml
+			
 			echo "We are Flying!! :)"
-			kubectl wait --for=condition=complete --timeout=120s -f node.yaml
+			kubectl wait --for=condition=complete --timeout=120s -f python.yaml
 			kubectl logs job/fly-job
-			rm -f node.yaml temp.yml template.yaml Dockerfile kubernetes_deploy.sh main.py
+			rm -f python.yaml temp.yml template.yaml Dockerfile kubernetes_deploy.sh main.py  int-svc.yaml
 	
 	'''
 	def CharSequence K8sAzureDeploy(Resource resource, String name, boolean local)
@@ -1567,8 +1579,11 @@ __index+=1
 	     exit 1
 	fi
 	echo "launching Redis deployment..."
+	cd src-gen/
+	echo "«generateExtK8Service(resource)»" > ext-svc.yaml
 	kubectl apply -f https://kubernetes.io/examples/application/job/redis/redis-pod.yaml
 	kubectl apply -f https://kubernetes.io/examples/application/job/redis/redis-service.yaml
+	kubectl apply -f ext-svc.yaml
 		
 	if [ $? -eq 0 ]; then
 		echo "Redis says hello :) continuing..."
@@ -1577,7 +1592,6 @@ __index+=1
 		    exit 1
 	fi
 	echo "Entering in the Python env"
-	cd src-gen/
 	echo "Generating Python code..."
 	echo "«generateBodyPy(root.body,root.parameters,name,env, local)»
 	
@@ -1609,7 +1623,7 @@ __index+=1
 			echo "We are Flying!! :)"
 			kubectl wait --for=condition=complete --timeout=120s -f python.yaml
 			kubectl logs job/fly-job
-			rm -f python.yaml temp.yml template.yaml Dockerfile kubernetes_deploy.sh main.py
+			rm -f python.yaml temp.yml template.yaml Dockerfile kubernetes_deploy.sh main.py ext-svc.yaml
 	
 	'''
 	def CharSequence AWSDebugDeploy(Resource resource, String name, boolean local, boolean debug)
@@ -1834,6 +1848,41 @@ __index+=1
 		CMD ["python3", "main.py"]
 		'''
 	}
+	def CharSequence generateExtK8Service(Resource resource){
+	'''
+	apiVersion: v1
+	kind: Service
+	metadata:
+	  name: public-svc
+	spec:
+	  type: LoadBalancer
+	  ports:
+	  - port: 6379
+	  selector:
+	    app: redis
+	'''
+	}
+	def CharSequence generateIntK8Service(Resource resource){
+	'''
+	apiVersion: v1
+	kind: Service
+	metadata:
+	  name: redis
+	  labels:
+	    app: redis
+	spec:
+	  type: NodePort
+	  ports:
+	    - port: 6379
+	      targetPort: 6379
+	      nodePort: 30014
+	      protocol: TCP
+	      name: redis
+	  selector:
+	    app: redis
+
+	'''
+	}		
 	   def CharSequence compileK8sJobTemplate(Resource resource){
    	'''
    	apiVersion: batch/v1
@@ -1841,6 +1890,7 @@ __index+=1
    	metadata:
    	  name: fly-job
    	spec:
+   	  ttlSecondsAfterFinished: 5
    	  parallelism: ${parallelism}
    	  completions: ${completions}
    	  template:
