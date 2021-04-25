@@ -117,8 +117,9 @@ class FLYGeneratorJs extends AbstractGenerator {
 				 nparallels = ((environment.environment.get(0).right as DeclarationObject).features.get(7) as DeclarationFeature).value_t
 				 nreplicas = ((environment.environment.get(0).right as DeclarationObject).features.get(7) as DeclarationFeature).value_t
 				}
-				case "local":
+				case "smp":
 				{
+				language = (environment.right as DeclarationObject).features.get(2).value_s
 				 nparallels = ((environment.environment.get(0).right as DeclarationObject).features.get(1) as DeclarationFeature).value_t
 				 nreplicas = ((environment.environment.get(0).right as DeclarationObject).features.get(1) as DeclarationFeature).value_t
 				}
@@ -1310,10 +1311,12 @@ class FLYGeneratorJs extends AbstractGenerator {
 		   case "aws-debug": AWSDebugDeploy(resource,name,local,true)
 		   case "azure": AzureDeploy(resource,name,local)
 		   case "k8s": {
-		   	if(right_env.contains("local"))
-		   	k8sDeploy(resource,name,local,false)
-		   	if(right_env.contains("azure"))
-		   	K8sAzureDeploy(resource)
+		   	if(right_env.contains("smp")){
+		   		k8sDeploy(resource,name,local,false)
+		   		}
+		   	else if(right_env.contains("azure")){
+		   		K8sAzureDeploy(resource)
+		   		}
 		   }
 		   default: this.env+" not supported"
   		}
@@ -1549,8 +1552,11 @@ class FLYGeneratorJs extends AbstractGenerator {
 	'''
 	#!/bin/bash
 	«isK8sOk(resource)»
-	echo "Entering in the Node env"
 	cd src-gen/
+	echo "launching Redis deployment..."
+	kubectl apply -f https://kubernetes.io/examples/application/job/redis/redis-pod.yaml
+	echo "«generateIntK8Service(resource)»" > int-svc.yaml
+	echo "Entering in the Node env"
 	echo "Generating Js code..."
 	echo "«generateBodyJs(resource,root.body,root.parameters,name,env)»
 				«FOR fd:functionCalled.values()»
@@ -1564,8 +1570,8 @@ class FLYGeneratorJs extends AbstractGenerator {
 	echo "Building and pushing the flying image"
 	
 	docker build -t fly_node . 
-	docker tag fly_node localhost:5000/fly_node
-	docker push localhost:5000/fly_node
+	docker tag fly_node «registryName»/fly_node
+	docker push «registryName»/fly_node
 	
 	echo "it's the moment:"
 	
@@ -1579,21 +1585,26 @@ class FLYGeneratorJs extends AbstractGenerator {
 	) >temp.yml
 	. temp.yml
 	cat node.yaml
+	kubectl apply -f int-svc.yaml
 	
 	kubectl apply -f node.yaml
 	echo "We are Flying!! :)"
 	kubectl wait --for=condition=complete --timeout=120s -f node.yaml
 	
 	kubectl logs job/fly-job
-	rm -f node.yaml temp.yml template.yaml Dockerfile kubernetes_deploy.sh main.js
+	rm -f node.yaml temp.yml template.yaml Dockerfile kubernetes_deploy.sh main.js int-svc.yaml
 	'''
 	
 	def CharSequence K8sAzureDeploy(Resource resource){
 	'''#!/bin/bash
 		
 		«isK8sOk(resource)»
+		cd src-gen/
+		echo "launching Redis deployment..."
+		kubectl apply -f https://kubernetes.io/examples/application/job/redis/redis-pod.yaml
+		kubectl apply -f https://kubernetes.io/examples/application/job/redis/redis-service.yaml
+		echo "«generateExtK8Service(resource)»" > ext-svc.yaml
 	    echo "Entering in the Node env"
-	    cd src-gen/
 		echo "Generating Js code..."
 		echo "«generateBodyJs(resource,root.body,root.parameters,name,env)»
 					«FOR fd:functionCalled.values()»
@@ -1619,12 +1630,12 @@ class FLYGeneratorJs extends AbstractGenerator {
 		) >temp.yml
 		. temp.yml
 		cat node.yaml
-		
+		kubectl apply -f ext-svc.yaml
 		kubectl apply -f node.yaml
 		echo "We are Flying!! :)"
 		kubectl wait --for=condition=complete --timeout=120s -f node.yaml
 		kubectl logs job/fly-job
-		rm -f node.yaml temp.yml template.yaml Dockerfile kubernetes_deploy.sh main.js
+		rm -f node.yaml temp.yml template.yaml Dockerfile kubernetes_deploy.sh main.js ext-svc.yaml
 		'''
 	}
 	
@@ -1650,27 +1661,6 @@ class FLYGeneratorJs extends AbstractGenerator {
 		     echo "Kube has something wrong :("
 		     exit 1
 		fi
-		
-		#echo "checking if Registry is on and fine ..."
-		#curl http://localhost:5000/v2/_catalog > /dev/null 2>&1
-		#if [ $? -eq 0 ]; then
-			#echo "Registry is on :) continuing..."
-		#else
-		     #echo "Registry doesn't responding... :("
-		     #exit 1
-		#fi
-		
-		echo "launching Redis deployment..."
-		kubectl apply -f https://kubernetes.io/examples/application/job/redis/redis-pod.yaml
-		kubectl apply -f https://kubernetes.io/examples/application/job/redis/redis-service.yaml
-		
-		if [ $? -eq 0 ]; then
-			echo "Redis says hello :) continuing..."
-		else
-		     echo "Redis has something wrong :("
-		     exit 1
-		fi
-				
 	'''
 	}
 	def CharSequence compileDockerTemplate(Resource resource){
@@ -1684,6 +1674,41 @@ class FLYGeneratorJs extends AbstractGenerator {
 		CMD ["node", "main.js"]
 		'''
 	}
+	def CharSequence generateExtK8Service(Resource resource){
+	'''
+	apiVersion: v1
+	kind: Service
+	metadata:
+	  name: public-svc
+	spec:
+	  type: LoadBalancer
+	  ports:
+	  - port: 6379
+	  selector:
+	    app: redis
+	'''
+	}
+	def CharSequence generateIntK8Service(Resource resource){
+	'''
+	apiVersion: v1
+	kind: Service
+	metadata:
+	  name: redis
+	  labels:
+	    app: redis
+	spec:
+	  type: NodePort
+	  ports:
+	    - port: 6379
+	      targetPort: 6379
+	      nodePort: 30014
+	      protocol: TCP
+	      name: redis
+	  selector:
+	    app: redis
+
+	'''
+	}		
    def CharSequence compileK8sJobTemplate(Resource resource){
    	'''
    	apiVersion: batch/v1
@@ -1693,6 +1718,7 @@ class FLYGeneratorJs extends AbstractGenerator {
    	spec:
    	  parallelism: ${parallelism}
    	  completions: ${completions}
+   	  ttlSecondsAfterFinished: 5
    	  template:
    	    metadata:
    	      name: fly
