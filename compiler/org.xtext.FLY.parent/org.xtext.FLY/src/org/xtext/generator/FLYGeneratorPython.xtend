@@ -1516,7 +1516,7 @@ __index+=1
 	kubectl apply -f https://kubernetes.io/examples/application/job/redis/redis-pod.yaml
 	echo "«generateIntK8Service(resource)»" > int-svc.yaml
 	echo "Entering in the Python env"
-	echo "Generating Python code...
+	echo "Generating Python code..."
 	echo "«generateBodyPy(root.body,root.parameters,name,env, local)»
 	
 	«FOR fd:functionCalled.values()»
