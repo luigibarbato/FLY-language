@@ -93,7 +93,8 @@ class FLYGenerator extends AbstractGenerator {
 			name = name_extension.toString.split('.fly').get(0)
 			// NDR
 			for (element : resource.allContents.toIterable.filter(FlyFunctionCall)) {
-				right_env = ((element.environment.environment.get(0).right as DeclarationObject).features.get(0) as DeclarationFeature).value_s
+				//TODO
+				//right_env = ((element.environment.environment.get(0).right as DeclarationObject).features.get(0) as DeclarationFeature).value_s
 				var type_env = ((element.environment.right as DeclarationObject).features.get(0) as DeclarationFeature).value_s;
 				var async = element.isAsync;
 				if(type_env.equals("smp") && ((element.environment.right as DeclarationObject).features.length==3)){
@@ -500,7 +501,32 @@ class FLYGenerator extends AbstractGenerator {
 
 		
 
-		
+		def CharSequence undeployK8s(){
+		return
+		'''
+		Runtime.getRuntime().exec("chmod +x src-gen/kubernetes_undeploy.sh");
+		ProcessBuilder __processBuilder_undeploy_kubernetes= new ProcessBuilder("/bin/bash", "-c", "src-gen/kubernetes_undeploy.sh");
+		Map<String, String> __env_undeploy_kubernetes = __processBuilder_undeploy_kubernetes.environment();
+							
+		__processBuilder_undeploy_kubernetes.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+		__processBuilder_undeploy_kubernetes.redirectError(ProcessBuilder.Redirect.INHERIT);
+		String __path_env_undeploy_kubernetes = __env_undeploy_kubernetes.get("PATH");
+		if (!__path_env_undeploy_kubernetes.contains("/usr/local/bin")) {
+								 __env_undeploy_kubernetes.put("PATH", __path_env_undeploy_kubernetes+":/usr/local/bin");
+							}
+							Process __p_undeploy_kubernetes;
+							try {
+								__p_undeploy_kubernetes= __processBuilder_undeploy_kubernetes.start();
+								__p_undeploy_kubernetes.waitFor();
+								if(__p_undeploy_kubernetes.exitValue()!=0){
+									System.out.println("Error in kubernetes_undeploy.sh ");
+									System.exit(1);
+								}
+							} catch (Exception e) {
+								e.printStackTrace();
+							}	
+		'''					
+		}
 		def undeployFlyFunctionOnCloud(FlyFunctionCall call) {
 			var env = (call.environment.right as DeclarationObject).features.get(0).value_s
 			if(deployed_function.get(env).contains(call.target.name)){
@@ -510,7 +536,7 @@ class FLYGenerator extends AbstractGenerator {
 				switch env {
 					case "aws":{
 						return '''
-							Runtime.getRuntime().exec("chmod +x src-gen/«call.target.name»_«call.environment.name»_undeploy.sh");
+							Runtime.getRuntime().exec("chmod +x src-gen/kubernetes_undeploy.sh");
 							ProcessBuilder __processBuilder_undeploy_«call.target.name» = new ProcessBuilder("/bin/bash", "-c", "src-gen/«call.target.name»_«call.environment.name»_undeploy.sh «user» «call.target.name» "+__id_execution);
 							Map<String, String> __env_undeploy_«call.target.name» = __processBuilder_undeploy_«call.target.name».environment();
 							
@@ -562,6 +588,31 @@ class FLYGenerator extends AbstractGenerator {
 						return '''
 						«cred».clear("./flyapp«cred»"+__id_execution,"./.env");
 						'''
+					}
+					case "k8s":{
+						return '''
+							Runtime.getRuntime().exec("chmod +x src-gen/kubernetes_undeploy.sh");
+							ProcessBuilder __processBuilder_undeploy_kubernetes= new ProcessBuilder("/bin/bash", "-c", "src-gen/kubernetes_undeploy.sh");
+							Map<String, String> __env_undeploy_kubernetes = __processBuilder_undeploy_kubernetes.environment();
+							
+							__processBuilder_undeploy_kubernetes.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+							__processBuilder_undeploy_kubernetes.redirectError(ProcessBuilder.Redirect.INHERIT);
+							String __path_env_undeploy_kubernetes = __env_undeploy_kubernetes.get("PATH");
+							if (!__path_env_undeploy_kubernetes.contains("/usr/local/bin")) {
+								 __env_undeploy_kubernetes.put("PATH", __path_env_undeploy_kubernetes+":/usr/local/bin");
+							}
+							Process __p_undeploy_kubernetes;
+							try {
+								__p_undeploy_kubernetes= __processBuilder_undeploy_kubernetes.start();
+								__p_undeploy_kubernetes.waitFor();
+								if(__p_undeploy_kubernetes.exitValue()!=0){
+									System.out.println("Error in kubernetes_undeploy.sh ");
+									System.exit(1);
+								}
+							} catch (Exception e) {
+								e.printStackTrace();
+							}	
+							'''				
 					}
 				}
 
@@ -1574,7 +1625,28 @@ class FLYGenerator extends AbstractGenerator {
 			«dec.name».put(jedis.rpop("queue:jobs"));
 			}
 			estimation();
-			}
+			Runtime.getRuntime().exec("chmod +x src-gen/kubernetes_undeploy.sh");
+								ProcessBuilder __processBuilder_undeploy_kubernetes= new ProcessBuilder("/bin/bash", "-c", "src-gen/kubernetes_undeploy.sh");
+								Map<String, String> __env_undeploy_kubernetes = __processBuilder_undeploy_kubernetes.environment();
+													
+								__processBuilder_undeploy_kubernetes.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+								__processBuilder_undeploy_kubernetes.redirectError(ProcessBuilder.Redirect.INHERIT);
+								String __path_env_undeploy_kubernetes = __env_undeploy_kubernetes.get("PATH");
+								if (!__path_env_undeploy_kubernetes.contains("/usr/local/bin")) {
+														 __env_undeploy_kubernetes.put("PATH", __path_env_undeploy_kubernetes+":/usr/local/bin");
+													}
+													Process __p_undeploy_kubernetes;
+													try {
+														__p_undeploy_kubernetes= __processBuilder_undeploy_kubernetes.start();
+														__p_undeploy_kubernetes.waitFor();
+														if(__p_undeploy_kubernetes.exitValue()!=0){
+															System.out.println("Error in kubernetes_undeploy.sh ");
+															System.exit(1);
+														}
+													} catch (Exception e) {
+														e.printStackTrace();
+													}
+						}		
 			'''
 			
 			}
@@ -1585,7 +1657,28 @@ class FLYGenerator extends AbstractGenerator {
 			«dec.name».put(jedis.rpop("queue:jobs"));
 			}
 			estimation();
-			}
+			Runtime.getRuntime().exec("chmod +x src-gen/kubernetes_undeploy.sh");
+					ProcessBuilder __processBuilder_undeploy_kubernetes= new ProcessBuilder("/bin/bash", "-c", "src-gen/kubernetes_undeploy.sh");
+					Map<String, String> __env_undeploy_kubernetes = __processBuilder_undeploy_kubernetes.environment();
+										
+					__processBuilder_undeploy_kubernetes.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+					__processBuilder_undeploy_kubernetes.redirectError(ProcessBuilder.Redirect.INHERIT);
+					String __path_env_undeploy_kubernetes = __env_undeploy_kubernetes.get("PATH");
+					if (!__path_env_undeploy_kubernetes.contains("/usr/local/bin")) {
+											 __env_undeploy_kubernetes.put("PATH", __path_env_undeploy_kubernetes+":/usr/local/bin");
+										}
+										Process __p_undeploy_kubernetes;
+										try {
+											__p_undeploy_kubernetes= __processBuilder_undeploy_kubernetes.start();
+											__p_undeploy_kubernetes.waitFor();
+											if(__p_undeploy_kubernetes.exitValue()!=0){
+												System.out.println("Error in kubernetes_undeploy.sh ");
+												System.exit(1);
+											}
+										} catch (Exception e) {
+											e.printStackTrace();
+										}
+			}		
 			'''
 			
 			}

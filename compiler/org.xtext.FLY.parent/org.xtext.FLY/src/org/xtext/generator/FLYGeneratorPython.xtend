@@ -170,6 +170,8 @@ class FLYGeneratorPython extends AbstractGenerator {
 			fsa.generateFile("Dockerfile", input.compileDockerTemplate())
 			fsa.generateFile("template.yaml", input.compileK8sJobTemplate())
 			fsa.generateFile("kubernetes_deploy.sh", input.compileScriptDeploy(root.name, false))
+			fsa.generateFile("kubernetes_undeploy.sh", input.compileScriptUndeploy(root.name, false))
+			
 			}
 		else{
 			fsa.generateFile(root.name +"_"+ env_name +"_deploy.sh", input.compileScriptDeploy(root.name, false))
@@ -1490,7 +1492,6 @@ __index+=1
 	def CharSequence K8sDeploy(Resource resource, String name, boolean local)
 	'''
 	#!/bin/bash
-	
 	echo "checking if Docker is on and fine ..."
 	docker info > /dev/null 2>&1
 	
@@ -1513,8 +1514,11 @@ __index+=1
 	fi
 	cd src-gen/
 	echo "launching Redis deployment..."
-	kubectl apply -f https://kubernetes.io/examples/application/job/redis/redis-pod.yaml
 	echo "«generateIntK8Service(resource)»" > int-svc.yaml
+	
+	kubectl apply -f https://kubernetes.io/examples/application/job/redis/redis-pod.yaml
+	kubectl apply -f int-svc.yaml
+	
 	echo "Entering in the Python env"
 	echo "Generating Python code..."
 	echo "«generateBodyPy(root.body,root.parameters,name,env, local)»
@@ -1529,8 +1533,8 @@ __index+=1
 	echo "Python file created"
 	echo "Building and pushing the flying image"
 	
-	docker build -t fly_node . 
-	docker tag fly_node «registryName»/fly_python
+	docker build -t fly_python . 
+	docker tag fly_python «registryName»/fly_python
 	docker push «registryName»/fly_python   
     echo "it's the moment:"
 		    
@@ -1545,7 +1549,6 @@ __index+=1
 			. temp.yml
 			cat python.yaml
 			
-			kubectl apply -f int-svc.yaml
 			kubectl apply -f python.yaml
 			
 			echo "We are Flying!! :)"
@@ -2114,12 +2117,20 @@ __index+=1
 	docker-compose down
 	docker network rm flynet
 	'''
-
+	def CharSequence K8sUndeploy(Resource resource, String string, boolean local)'''
+	#!/bin/bash
+	
+	kubectl delete job/fly-job
+	kubectl delete pod/redis-master
+	kubectl delete svc redis
+	kubectl delete svc public-svc
+	'''
 	def CharSequence compileScriptUndeploy(Resource resource, String name, boolean local){
 		switch this.env {
 			   case "aws": AWSUndeploy(resource,name,local,false)
 			   case "aws-debug": AWSDebugUndeploy(resource,name,local,true)
 			   case "azure": AzureUndeploy(resource,name,local)
+			   case "k8s": K8sUndeploy(resource,name,local)
 			   default: this.env+" not supported"
 	  		}
 	} 

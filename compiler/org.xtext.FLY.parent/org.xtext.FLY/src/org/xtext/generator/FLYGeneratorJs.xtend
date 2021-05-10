@@ -69,7 +69,7 @@ class FLYGeneratorJs extends AbstractGenerator {
 	/*KUBERNETES ENVS*/
 	int nreplicas = 0
 	int nparallels = 0
-	String registryName = "localhost:5000"
+	String registryName = ""
 	String resourceGroup = ""
 	String clusterName = ""
 	/*END*/
@@ -195,6 +195,8 @@ class FLYGeneratorJs extends AbstractGenerator {
 			fsa.generateFile("Dockerfile", input.compileDockerTemplate())
 			fsa.generateFile("template.yaml", input.compileK8sJobTemplate())
 			fsa.generateFile("kubernetes_deploy.sh", input.compileScriptDeploy(root.name, false))
+			fsa.generateFile("kubernetes_undeploy.sh", input.compileScriptUndeploy(root.name, false))
+			
 			}
 		else{
 			fsa.generateFile(root.name +"_"+ env_name +"_deploy.sh", input.compileScriptDeploy(root.name, false))
@@ -1554,8 +1556,11 @@ class FLYGeneratorJs extends AbstractGenerator {
 	«isK8sOk(resource)»
 	cd src-gen/
 	echo "launching Redis deployment..."
-	kubectl apply -f https://kubernetes.io/examples/application/job/redis/redis-pod.yaml
+	
 	echo "«generateIntK8Service(resource)»" > int-svc.yaml
+	kubectl apply -f int-svc.yaml
+	kubectl apply -f https://kubernetes.io/examples/application/job/redis/redis-pod.yaml
+	
 	echo "Entering in the Node env"
 	echo "Generating Js code..."
 	echo "«generateBodyJs(resource,root.body,root.parameters,name,env)»
@@ -1585,7 +1590,6 @@ class FLYGeneratorJs extends AbstractGenerator {
 	) >temp.yml
 	. temp.yml
 	cat node.yaml
-	kubectl apply -f int-svc.yaml
 	
 	kubectl apply -f node.yaml
 	echo "We are Flying!! :)"
@@ -1596,14 +1600,17 @@ class FLYGeneratorJs extends AbstractGenerator {
 	'''
 	
 	def CharSequence K8sAzureDeploy(Resource resource){
-	'''#!/bin/bash
-		
-		«isK8sOk(resource)»
-		cd src-gen/
-		echo "launching Redis deployment..."
-		kubectl apply -f https://kubernetes.io/examples/application/job/redis/redis-pod.yaml
-		kubectl apply -f https://kubernetes.io/examples/application/job/redis/redis-service.yaml
-		echo "«generateExtK8Service(resource)»" > ext-svc.yaml
+	'''
+	#!/bin/bash
+ 	az aks get-credentials --resource-group Fly --name Fly
+	«isK8sOk(resource)»
+	echo "launching Redis deployment..."
+	cd src-gen/		
+	echo "«generateExtK8Service(resource)»" > ext-svc.yaml	
+ 	kubectl apply -f https://kubernetes.io/examples/application/job/redis/redis-pod.yaml
+    kubectl apply -f https://kubernetes.io/examples/application/job/redis/redis-service.yaml
+ 	kubectl apply -f ext-svc.yaml
+ 	
 	    echo "Entering in the Node env"
 		echo "Generating Js code..."
 		echo "«generateBodyJs(resource,root.body,root.parameters,name,env)»
@@ -1630,13 +1637,12 @@ class FLYGeneratorJs extends AbstractGenerator {
 		) >temp.yml
 		. temp.yml
 		cat node.yaml
-		kubectl apply -f ext-svc.yaml
 		kubectl apply -f node.yaml
 		echo "We are Flying!! :)"
 		kubectl wait --for=condition=complete --timeout=120s -f node.yaml
 		kubectl logs job/fly-job
-		rm -f node.yaml temp.yml template.yaml Dockerfile kubernetes_deploy.sh main.js ext-svc.yaml
-		'''
+		rm -f node.yaml temp.yml template.yaml Dockerfile kubernetes_deploy.sh main.js ext-svc.yaml	
+	'''
 	}
 	
 	def CharSequence isK8sOk(Resource resource){
@@ -2005,7 +2011,14 @@ class FLYGeneratorJs extends AbstractGenerator {
 		rm rolePolicyDocument.json
 		rm policyDocument.json
 		'''
-
+	def CharSequence K8sUndeploy(Resource resource, String string, boolean local)'''
+	#!/bin/bash
+	
+	kubectl delete job/fly-job
+	kubectl delete pod/redis-master
+	kubectl delete svc redis
+	kubectl delete svc public-svc
+	'''
 	def CharSequence compileDockerCompose(Resource resource)
 	'''
 		docker network create -d bridge --subnet 192.168.0.0/24 --gateway 192.168.0.1 flynet
@@ -2220,6 +2233,7 @@ class FLYGeneratorJs extends AbstractGenerator {
 			   case "aws": AWSUndeploy(resource,name)
 			   case "aws-debug": AWSDebugUndeploy(resource,name)
 			   case "azure": AzureUndeploy(resource,name,local)
+			   case "k8s": K8sUndeploy(resource,name,local)
 			   default: this.env+" not supported"
 	  		}
 	} 
